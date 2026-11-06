@@ -20,7 +20,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: gitleaks
@@ -49,7 +49,7 @@ jobs:
           --health-timeout 5s --health-retries 10
         ports: ['5432:5432']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Apply migrations
         env:
           PGPASSWORD: ci
@@ -94,7 +94,7 @@ jobs:
     name: SAST (detekt + semgrep)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -121,15 +121,19 @@ jobs:
     name: Build and unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # android-actions/setup-android is intentionally absent: it fails on the
+      # current runner image ("Wrong version in preinstalled sdkmanager") and the
+      # job needs no Android SDK until the Gradle project exists. Re-add it in the
+      # same PR that adds ./gradlew.
+      #
       # Same design-stage guard as Gate 3: this gate activates when the Gradle
       # module lands. The algorithms demo is the buildable artefact today and is
-      # asserted by Gate 4a below.
+      # asserted by the algo-demo job below.
       - name: Assemble debug and test
         run: |
           if [ -f ./gradlew ]; then ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon; else
@@ -146,8 +150,8 @@ jobs:
     name: Algorithm demo assertions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Run demo with correctness assertions
