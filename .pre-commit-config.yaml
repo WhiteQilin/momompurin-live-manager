@@ -1,0 +1,38 @@
+# Git Policy-as-Code — Momompurin Live Manager
+#
+# `pre-commit install` wires the hooks below into .git/hooks. They are also
+# enforced server-side by .github/workflows/security.yml, because a local hook
+# can be skipped with --no-verify and a policy that only runs locally is a
+# suggestion.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: gitleaks — staged credential scan
+        args: ['--config', 'security/gitleaks.toml', '--redact']
+
+  - repo: local
+    hooks:
+      - id: rls-guard
+        name: RLS — every new table must enable Row Level Security
+        entry: bash security/pre-commit
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: kotlin-format
+        name: ktlint
+        entry: ./gradlew ktlintCheck
+        language: system
+        files: '\.kt$'
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=2048']
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

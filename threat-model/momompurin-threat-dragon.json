@@ -1,0 +1,1580 @@
+{
+  "version": "2.0",
+  "summary": {
+    "title": "Momompurin Live Manager \u2014 Application Threat Model (IAS Milestone 1)",
+    "owner": "Group 8 \u2014 III-BCSAD, University of Makati",
+    "description": "Threat model for the Phase 1 Android application: a Kotlin/Jetpack Compose client over a managed Supabase backend (PostgreSQL, GoTrue auth, object storage, PostgREST). Level 0 context and Level 1 decomposition with three trust boundaries and STRIDE threats embedded per element.",
+    "id": 0
+  },
+  "detail": {
+    "contributors": [
+      {
+        "name": "Garlando, Gabriel (A12448733)"
+      },
+      {
+        "name": "Sabangan, Samantha (K12257396)"
+      },
+      {
+        "name": "Infante, Justin Nils (A12448732)"
+      },
+      {
+        "name": "Maldo, Kenshin (A12448948)"
+      }
+    ],
+    "diagrams": [
+      {
+        "version": "2.0",
+        "title": "Diagram A \u2014 Level 0 (Context) DFD",
+        "thumbnail": "./public/content/images/thumbnail.stride.jpg",
+        "diagramType": "STRIDE",
+        "id": 0,
+        "cells": [
+          {
+            "position": {
+              "x": 40,
+              "y": 150
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "Shop Owner\n(Android device)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "actor",
+            "zIndex": 7,
+            "id": "61ea7a29-f946-5e2f-abcc-abcc6009f001",
+            "data": {
+              "type": "tm.Actor",
+              "name": "Shop Owner\n(Android device)",
+              "description": "The business owner, authenticated on the Phase 1 Android app.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "High",
+                  "title": "T-01 Owner device compromised or credential stolen",
+                  "type": "Spoofing",
+                  "description": "A lost or rooted device yields a live refresh token. Because the app is the only identity the business has, a stolen session is indistinguishable from the owner.",
+                  "mitigation": "Device-bound refresh token, 30-minute access token, biometric unlock, and remote session revocation from the Supabase dashboard.",
+                  "modelType": "STRIDE",
+                  "id": "5222bae0-9d15-5675-8228-ca2b21f4e647"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 360,
+              "y": 140
+            },
+            "size": {
+              "width": 230,
+              "height": 110
+            },
+            "attrs": {
+              "text": {
+                "text": "0.0\nMomompurin Live Manager\n(Android + Supabase)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "9d5c81dc-72f9-5f0b-bd78-48aa3d922fd6",
+            "data": {
+              "type": "tm.Process",
+              "name": "0.0\nMomompurin Live Manager\n(Android + Supabase)",
+              "description": "The capstone system: a Kotlin/Compose client over a managed Supabase backend.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 720,
+              "y": 150
+            },
+            "size": {
+              "width": 200,
+              "height": 90
+            },
+            "attrs": {
+              "text": {
+                "text": "Supabase Project\n(Postgres \u00b7 Auth \u00b7 Storage)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "store",
+            "zIndex": 7,
+            "id": "4487636c-3e8d-5773-803d-c11109e3394b",
+            "data": {
+              "type": "tm.Store",
+              "name": "Supabase Project\n(Postgres \u00b7 Auth \u00b7 Storage)",
+              "description": "Managed backend. Postgres, GoTrue auth, object storage, PostgREST API.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false,
+              "isEncrypted": true
+            }
+          },
+          {
+            "position": {
+              "x": 40,
+              "y": 330
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "Customer\n(via Facebook / TikTok chat)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "actor",
+            "zIndex": 7,
+            "id": "4475109e-5857-5e88-878f-6d0c46a88ca7",
+            "data": {
+              "type": "tm.Actor",
+              "name": "Customer\n(via Facebook / TikTok chat)",
+              "description": "Buyer. Interacts through social messaging, not through the app, in Phase 1.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 720,
+              "y": 330
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "Facebook Messenger\n(invoice share target)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "actor",
+            "zIndex": 7,
+            "id": "f86500e8-d0eb-5650-a4c6-d8eea5dfe0e4",
+            "data": {
+              "type": "tm.Actor",
+              "name": "Facebook Messenger\n(invoice share target)",
+              "description": "External messaging platform the invoice is shared into.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "claim entry, stock and status queries",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "a30bc7a2-36e6-5dba-ba6e-e779775dc436",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "claim entry, stock and status queries (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "61ea7a29-f946-5e2f-abcc-abcc6009f001"
+            },
+            "target": {
+              "cell": "9d5c81dc-72f9-5f0b-bd78-48aa3d922fd6"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "invoices, order status, reports",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "d477a86a-ce43-59d1-a689-30dc71fd585e",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "invoices, order status, reports (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "9d5c81dc-72f9-5f0b-bd78-48aa3d922fd6"
+            },
+            "target": {
+              "cell": "61ea7a29-f946-5e2f-abcc-abcc6009f001"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "reads and writes, authenticated by JWT",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "48c10bcf-84ad-5169-8278-30e59de7c31d",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "reads and writes, authenticated by JWT (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "9d5c81dc-72f9-5f0b-bd78-48aa3d922fd6"
+            },
+            "target": {
+              "cell": "4487636c-3e8d-5773-803d-c11109e3394b"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "row-scoped results",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "a3d51cec-c601-5a66-ae86-6d2332b20e96",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "row-scoped results (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "4487636c-3e8d-5773-803d-c11109e3394b"
+            },
+            "target": {
+              "cell": "9d5c81dc-72f9-5f0b-bd78-48aa3d922fd6"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "shared invoice image / PDF",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "Android share sheet",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "d5d4272e-60ae-53ee-a470-71a04e30bf6c",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "shared invoice image / PDF (Android share sheet)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "9d5c81dc-72f9-5f0b-bd78-48aa3d922fd6"
+            },
+            "target": {
+              "cell": "f86500e8-d0eb-5650-a4c6-d8eea5dfe0e4"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "claim placed in live chat",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "TikTok / FB chat",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "c5d0399a-3530-5473-9379-db19952140a0",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "claim placed in live chat (TikTok / FB chat)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "4475109e-5857-5e88-878f-6d0c46a88ca7"
+            },
+            "target": {
+              "cell": "61ea7a29-f946-5e2f-abcc-abcc6009f001"
+            }
+          }
+        ]
+      },
+      {
+        "version": "2.0",
+        "title": "Diagram B \u2014 Level 1 System Decomposition DFD (TB1\u2013TB3)",
+        "thumbnail": "./public/content/images/thumbnail.stride.jpg",
+        "diagramType": "STRIDE",
+        "id": 1,
+        "cells": [
+          {
+            "position": {
+              "x": 40,
+              "y": 90
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "Shop Owner\n(Android device)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "actor",
+            "zIndex": 7,
+            "id": "61ea7a29-f946-5e2f-abcc-abcc6009f001",
+            "data": {
+              "type": "tm.Actor",
+              "name": "Shop Owner\n(Android device)",
+              "description": "Single authenticated user of the Phase 1 application.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "High",
+                  "title": "T-01 Owner device compromised or credential stolen",
+                  "type": "Spoofing",
+                  "description": "A lost or rooted device yields a live refresh token. Because the app is the only identity the business has, a stolen session is indistinguishable from the owner.",
+                  "mitigation": "Device-bound refresh token, 30-minute access token, biometric unlock, and remote session revocation from the Supabase dashboard.",
+                  "modelType": "STRIDE",
+                  "id": "5222bae0-9d15-5675-8228-ca2b21f4e647"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 40,
+              "y": 240
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "1.0\nSign-In &\nSession"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "cf29b5c0-9186-5d72-ad90-283d6a5fdb22",
+            "data": {
+              "type": "tm.Process",
+              "name": "1.0\nSign-In &\nSession",
+              "description": "Supabase Auth (GoTrue) client. Holds the JWT in EncryptedSharedPreferences.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "Medium",
+                  "title": "T-09 No durable audit trail of claim edits",
+                  "type": "Repudiation",
+                  "description": "Claim rows can be overwritten with no record of who changed what. The owner cannot prove the state of a disputed order.",
+                  "mitigation": "activity_log table written by trigger on every mutation, append-only, with actor id and before/after values.",
+                  "modelType": "STRIDE",
+                  "id": "7bfc7a19-c67d-5cf3-8011-496ca84d2bd7"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 40,
+              "y": 390
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "D1\nRoom (SQLite)\nlocal cache"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "store",
+            "zIndex": 7,
+            "id": "6c73176a-d44e-574f-b9b5-961790053464",
+            "data": {
+              "type": "tm.Store",
+              "name": "D1\nRoom (SQLite)\nlocal cache",
+              "description": "Offline-first local store for the live session. Holds customer PII until sync.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "High",
+                  "title": "T-08 Unencrypted Room database exposed via adb backup",
+                  "type": "Tampering",
+                  "description": "android:allowBackup defaults to true. A local backup extracts the SQLite file with every cached customer name, phone and address in plaintext.",
+                  "mitigation": "allowBackup=false, dataExtractionRules denying cloud and device transfer, and SQLCipher on the Room database.",
+                  "modelType": "STRIDE",
+                  "id": "2f0e145f-6d03-5608-bb34-14a780cedf4d"
+                }
+              ],
+              "isTrustBoundary": false,
+              "isEncrypted": false
+            }
+          },
+          {
+            "position": {
+              "x": 300,
+              "y": 90
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "2.0\nCapture &\nValidate Claim"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "fbb3ff60-8926-5a49-bba6-547d238fe484",
+            "data": {
+              "type": "tm.Process",
+              "name": "2.0\nCapture &\nValidate Claim",
+              "description": "Compose screen + ViewModel. Validates SKU, quantity and customer handle before write.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 300,
+              "y": 240
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "3.0\nPostgREST\nAPI"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "7a6944c4-9db2-588e-aa65-bdb47287f67e",
+            "data": {
+              "type": "tm.Process",
+              "name": "3.0\nPostgREST\nAPI",
+              "description": "Auto-generated REST surface. Executes every request as the role named in the JWT.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "Medium",
+                  "title": "T-05 Unbounded query on the auto-generated REST surface",
+                  "type": "Denial of service",
+                  "description": "PostgREST honours Range headers and arbitrary filters. A single request can ask for the full order history, and there is no per-IP limit in front of the API.",
+                  "mitigation": "Row limits in the client, a statement_timeout of 5s, and edge rate limiting of 60 requests/minute per token.",
+                  "modelType": "STRIDE",
+                  "id": "5c7f6f29-69a5-5940-af32-d60d80eda7f5"
+                },
+                {
+                  "status": "Open",
+                  "severity": "High",
+                  "title": "T-02 Claim payload modified in transit or replayed",
+                  "type": "Tampering",
+                  "description": "The claim write trusts client-supplied quantity and price. A replayed or edited body can book stock at a stale price.",
+                  "mitigation": "Price and stock are recomputed server-side in a Postgres function; the client sends SKU and quantity only; writes carry an idempotency key.",
+                  "modelType": "STRIDE",
+                  "id": "f3a2dd3f-d447-5b45-a1c0-c0b765c53a82"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 300,
+              "y": 390
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "4.0\nSync Worker\n(WorkManager)"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "35617c31-a3a7-533d-9afc-c4b741573ea8",
+            "data": {
+              "type": "tm.Process",
+              "name": "4.0\nSync Worker\n(WorkManager)",
+              "description": "Background reconciliation of Room against Postgres after connectivity returns.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "Medium",
+                  "title": "T-03 Stale queued write overwrites a newer server row",
+                  "type": "Tampering",
+                  "description": "WorkManager retries a queued claim after connectivity returns. Without a version check the retry silently overwrites an edit the owner made on another device.",
+                  "mitigation": "Optimistic concurrency on a row version column; conflicting writes are rejected and surfaced to the owner rather than merged silently.",
+                  "modelType": "STRIDE",
+                  "id": "337867c8-48bd-56a6-9134-981e7465278e"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 600,
+              "y": 240
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "5.0\nRLS Policy\nEngine"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "6424dbc6-c583-53cc-bf02-0d7fd98a6606",
+            "data": {
+              "type": "tm.Process",
+              "name": "5.0\nRLS Policy\nEngine",
+              "description": "Postgres row security. The only control that scopes an anon-key request.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "Critical",
+                  "title": "T-04 Row Level Security not enabled \u2014 anon reads every table",
+                  "type": "Information disclosure",
+                  "description": "The shipped schema granted SELECT to the anon role and never enabled RLS. The anon key is compiled into the APK, so any holder of the APK can read all customers, orders and supplier costs. Reproduced end to end in poc/run_poc.mjs.",
+                  "mitigation": "Revoke anon grants, enable and force RLS on every table, attach an owner-only policy, and fail the CI build when any public table has relrowsecurity = false.",
+                  "modelType": "STRIDE",
+                  "id": "5a80ff21-0e08-5caf-b524-260913acdff3"
+                },
+                {
+                  "status": "Open",
+                  "severity": "High",
+                  "title": "T-06 Policy keyed on a client-controlled claim",
+                  "type": "Elevation of privilege",
+                  "description": "If the owner test reads user_metadata instead of app_metadata, the value is writable by the signed-in user and the policy authorises anyone who sets it.",
+                  "mitigation": "Key every policy on app_metadata, which only the service role can write, and assert the claim name in the migration test suite.",
+                  "modelType": "STRIDE",
+                  "id": "937eca79-640e-5050-9289-a17f1e92f3cd"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 600,
+              "y": 390
+            },
+            "size": {
+              "width": 170,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "6.0\nInvoice Edge\nFunction"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "process",
+            "zIndex": 7,
+            "id": "acfca949-6806-5cad-a60f-26a32781ba8e",
+            "data": {
+              "type": "tm.Process",
+              "name": "6.0\nInvoice Edge\nFunction",
+              "description": "Deno function that renders the invoice PDF and writes it to storage.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "Critical",
+                  "title": "T-10 service_role key reachable from the edge function",
+                  "type": "Information disclosure",
+                  "description": "The invoice function needs a service-role key to write storage. An unhandled error that echoes the environment returns that key to the caller.",
+                  "mitigation": "Key injected as a Supabase secret, never read into a response, and a global error handler that returns a correlation id only.",
+                  "modelType": "STRIDE",
+                  "id": "3f86f69c-36b7-541a-ab1e-9f1904e7c5e6"
+                }
+              ],
+              "isTrustBoundary": false
+            }
+          },
+          {
+            "position": {
+              "x": 900,
+              "y": 90
+            },
+            "size": {
+              "width": 200,
+              "height": 90
+            },
+            "attrs": {
+              "text": {
+                "text": "D2\nPostgreSQL\ncustomers \u00b7 orders \u00b7 inventory"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "store",
+            "zIndex": 7,
+            "id": "78a62bae-be52-5bbc-96ea-6357281e3049",
+            "data": {
+              "type": "tm.Store",
+              "name": "D2\nPostgreSQL\ncustomers \u00b7 orders \u00b7 inventory",
+              "description": "Primary store for A-01, A-02, A-03.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false,
+              "isEncrypted": true
+            }
+          },
+          {
+            "position": {
+              "x": 900,
+              "y": 390
+            },
+            "size": {
+              "width": 200,
+              "height": 80
+            },
+            "attrs": {
+              "text": {
+                "text": "D3\nStorage bucket\ninvoice PDFs"
+              },
+              "body": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "strokeDasharray": "none"
+              }
+            },
+            "shape": "store",
+            "zIndex": 7,
+            "id": "ac2282c1-c0a4-5b73-b75b-62bcab354a6d",
+            "data": {
+              "type": "tm.Store",
+              "name": "D3\nStorage bucket\ninvoice PDFs",
+              "description": "Object storage. Private bucket, signed URLs only.",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "hasOpenThreats": true,
+              "threats": [
+                {
+                  "status": "Open",
+                  "severity": "High",
+                  "title": "T-07 Public storage bucket enumerable by object name",
+                  "type": "Information disclosure",
+                  "description": "Invoice files named INV-0070.pdf in a public bucket are trivially enumerated, leaking customer names, addresses and order values.",
+                  "mitigation": "Private bucket, RLS on storage.objects scoped to the owner, and 60-second signed URLs generated server-side.",
+                  "modelType": "STRIDE",
+                  "id": "3efe909d-72f5-5127-bf92-de9b1048b2ab"
+                }
+              ],
+              "isTrustBoundary": false,
+              "isEncrypted": true
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "claim entry",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "in-process",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "632f5efb-6121-5976-95d6-a34b14f91a0a",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "claim entry (in-process)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "61ea7a29-f946-5e2f-abcc-abcc6009f001"
+            },
+            "target": {
+              "cell": "fbb3ff60-8926-5a49-bba6-547d238fe484"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "draft claim",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "Room DAO",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "8034cc25-3e17-5ee5-9dda-ec0365eb1247",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "draft claim (Room DAO)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "fbb3ff60-8926-5a49-bba6-547d238fe484"
+            },
+            "target": {
+              "cell": "6c73176a-d44e-574f-b9b5-961790053464"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "claim payload",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "7d4520bd-f446-5d4b-9627-dbfb96f0a0e3",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "claim payload (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "fbb3ff60-8926-5a49-bba6-547d238fe484"
+            },
+            "target": {
+              "cell": "7a6944c4-9db2-588e-aa65-bdb47287f67e"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "credentials, then JWT",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "64591ade-e330-5b53-9c4d-fd91e1a2ea3c",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "credentials, then JWT (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "cf29b5c0-9186-5d72-ad90-283d6a5fdb22"
+            },
+            "target": {
+              "cell": "7a6944c4-9db2-588e-aa65-bdb47287f67e"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "queued writes",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "f9169479-fada-51d1-8013-b2b27e8fb3f3",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "queued writes (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "35617c31-a3a7-533d-9afc-c4b741573ea8"
+            },
+            "target": {
+              "cell": "7a6944c4-9db2-588e-aa65-bdb47287f67e"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "query under session role",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "in-process",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "e825c8d6-af52-5e48-a25a-decd58e556dd",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "query under session role (in-process)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "7a6944c4-9db2-588e-aa65-bdb47287f67e"
+            },
+            "target": {
+              "cell": "6424dbc6-c583-53cc-bf02-0d7fd98a6606"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "policy-filtered rows",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "in-process",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "59dda72e-37e6-5835-9d89-fc5eaa5e54e6",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "policy-filtered rows (in-process)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "6424dbc6-c583-53cc-bf02-0d7fd98a6606"
+            },
+            "target": {
+              "cell": "78a62bae-be52-5bbc-96ea-6357281e3049"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "row set",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "in-process",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "8057dfff-d1dc-5599-9941-900af65e7d89",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "row set (in-process)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "78a62bae-be52-5bbc-96ea-6357281e3049"
+            },
+            "target": {
+              "cell": "6424dbc6-c583-53cc-bf02-0d7fd98a6606"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "rendered invoice PDF",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "internal API",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "9908cb2f-b3b0-5d41-95c3-244f8f8a05f2",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "rendered invoice PDF (internal API)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "acfca949-6806-5cad-a60f-26a32781ba8e"
+            },
+            "target": {
+              "cell": "ac2282c1-c0a4-5b73-b75b-62bcab354a6d"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "signed object URL",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "internal API",
+              "isEncrypted": false,
+              "isPublicNetwork": false,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "d30e7469-857f-53cc-bb3e-64674f2a65fc",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "signed object URL (internal API)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "ac2282c1-c0a4-5b73-b75b-62bcab354a6d"
+            },
+            "target": {
+              "cell": "acfca949-6806-5cad-a60f-26a32781ba8e"
+            }
+          },
+          {
+            "shape": "flow",
+            "attrs": {
+              "line": {
+                "stroke": "#333333",
+                "strokeWidth": 1,
+                "targetMarker": {
+                  "name": "block"
+                }
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 10,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Flow",
+              "name": "invoice request",
+              "description": "",
+              "outOfScope": false,
+              "reasonOutOfScope": "",
+              "protocol": "HTTPS / TLS 1.3",
+              "isEncrypted": true,
+              "isPublicNetwork": true,
+              "hasOpenThreats": false,
+              "threats": [],
+              "isTrustBoundary": false
+            },
+            "id": "adeadc55-5530-5702-8987-235c4eeaea74",
+            "labels": [
+              {
+                "position": 0.5,
+                "attrs": {
+                  "label": {
+                    "text": "invoice request (HTTPS / TLS 1.3)"
+                  }
+                }
+              }
+            ],
+            "source": {
+              "cell": "7a6944c4-9db2-588e-aa65-bdb47287f67e"
+            },
+            "target": {
+              "cell": "acfca949-6806-5cad-a60f-26a32781ba8e"
+            }
+          },
+          {
+            "shape": "trust-boundary-curve",
+            "attrs": {
+              "line": {
+                "targetMarker": "",
+                "sourceMarker": ""
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 20,
+            "connector": "smooth",
+            "labels": [
+              {
+                "attrs": {
+                  "text": {
+                    "text": "TB1 \u2014 Untrusted client device \u2192 Supabase public API"
+                  }
+                }
+              }
+            ],
+            "data": {
+              "type": "tm.Boundary",
+              "name": "TB1 \u2014 Untrusted client device \u2192 Supabase public API",
+              "description": "",
+              "isTrustBoundary": true,
+              "hasOpenThreats": false
+            },
+            "id": "84a1167b-3cda-5c02-b96f-fd160b1797c2",
+            "source": {
+              "x": 255,
+              "y": 40
+            },
+            "target": {
+              "x": 255,
+              "y": 520
+            },
+            "vertices": [
+              {
+                "x": 255,
+                "y": 300
+              }
+            ]
+          },
+          {
+            "shape": "trust-boundary-curve",
+            "attrs": {
+              "line": {
+                "targetMarker": "",
+                "sourceMarker": ""
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 20,
+            "connector": "smooth",
+            "labels": [
+              {
+                "attrs": {
+                  "text": {
+                    "text": "TB2 \u2014 Public API edge \u2192 managed compute"
+                  }
+                }
+              }
+            ],
+            "data": {
+              "type": "tm.Boundary",
+              "name": "TB2 \u2014 Public API edge \u2192 managed compute",
+              "description": "",
+              "isTrustBoundary": true,
+              "hasOpenThreats": false
+            },
+            "id": "2178d2bc-b541-5b31-b2c2-0e736a96f1bd",
+            "source": {
+              "x": 555,
+              "y": 40
+            },
+            "target": {
+              "x": 555,
+              "y": 520
+            },
+            "vertices": [
+              {
+                "x": 555,
+                "y": 300
+              }
+            ]
+          },
+          {
+            "shape": "trust-boundary-curve",
+            "attrs": {
+              "line": {
+                "targetMarker": "",
+                "sourceMarker": ""
+              }
+            },
+            "width": 200,
+            "height": 100,
+            "zIndex": 20,
+            "connector": "smooth",
+            "labels": [
+              {
+                "attrs": {
+                  "text": {
+                    "text": "TB3 \u2014 Managed compute \u2192 data persistence"
+                  }
+                }
+              }
+            ],
+            "data": {
+              "type": "tm.Boundary",
+              "name": "TB3 \u2014 Managed compute \u2192 data persistence",
+              "description": "",
+              "isTrustBoundary": true,
+              "hasOpenThreats": false
+            },
+            "id": "bd91ef64-0caf-5594-89cf-a80c85d29c1d",
+            "source": {
+              "x": 860,
+              "y": 40
+            },
+            "target": {
+              "x": 860,
+              "y": 520
+            },
+            "vertices": [
+              {
+                "x": 860,
+                "y": 300
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "diagramTop": 2,
+    "reviewer": "Prof. Nomar B. Maestro",
+    "threatTop": 11
+  }
+}

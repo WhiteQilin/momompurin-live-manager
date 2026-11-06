@@ -1,0 +1,12 @@
+# proof-of-concept runtime
+poc/node_modules/
+poc/.pgdata/
+poc/package-lock.json
+
+# build output
+*.log
+
+# python
+__pycache__/
+*.pyc
+algorithms/benchmark/algo_results*.json

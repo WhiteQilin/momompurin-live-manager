@@ -1,0 +1,53 @@
+# Gitleaks configuration — Momompurin Live Manager
+#
+# Policy: the repository is public. Nothing that grants access to a system may
+# ever be committed, including in a deleted commit, a test fixture, or a
+# .env.example that someone pasted a real value into.
+#
+# The Supabase anon key is deliberately NOT on the allowlist. It is publishable
+# by design, but the pattern below still flags it so that a service_role key
+# pasted by mistake in the same commit is caught. An anon key that trips the
+# scanner is a two-minute conversation; a service_role key that does not is an
+# incident.
+
+title = "Momompurin Live Manager secret policy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "supabase-service-role-key"
+description = "Supabase service_role key — bypasses Row Level Security"
+regex = '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'''
+entropy = 3.5
+keywords = ["service_role", "supabase"]
+
+[[rules]]
+id = "supabase-db-url-with-password"
+description = "Postgres connection string carrying a password"
+regex = '''postgres(ql)?://[^:\s]+:[^@\s]+@[^\s/]+'''
+keywords = ["postgres", "postgresql"]
+
+[[rules]]
+id = "android-keystore-password"
+description = "Signing keystore credentials in a Gradle or properties file"
+regex = '''(?i)(storePassword|keyPassword)\s*[=:]\s*["']?[^\s"']{6,}'''
+keywords = ["storePassword", "keyPassword"]
+
+[[rules]]
+id = "jwt-private-key"
+description = "JWT signing secret committed as a literal"
+regex = '''(?i)(jwt[_-]?secret|supabase[_-]?jwt)\s*[=:]\s*["'][^"']{16,}["']'''
+
+[allowlist]
+description = "Documented placeholders and synthetic PoC fixtures"
+paths = [
+  '''poc/run_poc\.mjs''',          # synthetic keys marked POC_NOT_A_REAL_KEY
+  '''security/gitleaks\.toml''',   # this file describes the patterns
+  '''README\.md''',
+]
+regexes = [
+  '''REPLACE_WITH_PROJECT_ANON_KEY''',
+  '''POC_NOT_A_REAL_KEY''',
+  '''<[A-Z_]+>''',
+]

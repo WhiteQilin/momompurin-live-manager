@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# Momompurin Live Manager — pre-commit guard
+#
+# Installed by `pre-commit install`, or manually:
+#     cp security/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# Two checks, both fast enough to run on every commit:
+#   1. no credential in the staged diff (gitleaks)
+#   2. every new table in a staged migration also enables Row Level Security
+#
+# Check 2 is the one that matters for this project. The defect reproduced in
+# poc/run_poc.mjs was a table created without RLS; a reviewer looking at a
+# 400-line migration will not reliably notice the missing line, and a machine
+# will.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+RED=$'\033[31m'; YEL=$'\033[33m'; GRN=$'\033[32m'; OFF=$'\033[0m'
+fail=0
+
+# ---------------------------------------------------------------- 1. secrets
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact --config security/gitleaks.toml; then
+    echo "${RED}✗ gitleaks: a credential is staged. Commit blocked.${OFF}" >&2
+    fail=1
+  fi
+else
+  echo "${YEL}! gitleaks not installed — secret scan skipped. Install gitleaks: https://github.com/gitleaks/gitleaks#install${OFF}" >&2
+fi
+
+# ---------------------------------------------------------------- 2. RLS
+staged_sql=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^supabase/migrations/.*\.sql$' || true)
+
+if [ -n "$staged_sql" ]; then
+  for f in $staged_sql; do
+    # tables created in this file
+    created=$(grep -oiE 'create[[:space:]]+table[[:space:]]+(if[[:space:]]+not[[:space:]]+exists[[:space:]]+)?[a-z0-9_."]+' "$f" \
+              | awk '{print $NF}' | tr -d '"' | sed 's/.*\.//' | sort -u || true)
+    for t in $created; do
+      if ! grep -qiE "alter[[:space:]]+table[[:space:]]+([a-z0-9_]+\.)?${t}[[:space:]]+enable[[:space:]]+row[[:space:]]+level[[:space:]]+security" "$f"; then
+        echo "${RED}✗ $f creates table '$t' but never enables Row Level Security on it.${OFF}" >&2
+        echo "  Add:  alter table public.$t enable row level security;" >&2
+        echo "  and an explicit policy. See supabase/migrations/0002 for the pattern." >&2
+        fail=1
+      fi
+    done
+  done
+fi
+
+# ---------------------------------------------------------------- 3. manifest
+staged_manifest=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'AndroidManifest\.xml$' || true)
+if [ -n "$staged_manifest" ]; then
+  if grep -qiE 'android:allowBackup="true"' $staged_manifest; then
+    echo "${RED}✗ AndroidManifest sets allowBackup=\"true\" — adb backup extracts the Room database.${OFF}" >&2
+    fail=1
+  fi
+  if grep -qiE 'android:usesCleartextTraffic="true"' $staged_manifest; then
+    echo "${RED}✗ AndroidManifest sets usesCleartextTraffic=\"true\".${OFF}" >&2
+    fail=1
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "${RED}Commit blocked by security/pre-commit.${OFF}" >&2
+  echo "Bypassing with --no-verify is logged in the pull request checklist." >&2
+  exit 1
+fi
+
+echo "${GRN}✓ security pre-commit passed${OFF}"

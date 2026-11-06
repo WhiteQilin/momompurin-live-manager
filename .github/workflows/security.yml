@@ -1,0 +1,154 @@
+name: security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate 1 — no secret ever reaches the repository.
+  # Gitleaks runs on the diff, not the tree, so a key committed and deleted in
+  # a later commit is still caught on the pull request that introduced it.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: security/gitleaks.toml
+
+  # ---------------------------------------------------------------------------
+  # Gate 2 — every table in the exposed schema has Row Level Security on.
+  # This is the assertion that would have caught the defect in
+  # poc/run_poc.mjs before it reached the client's device. It runs against the
+  # staging database, whose migrations are the ones under review.
+  # ---------------------------------------------------------------------------
+  rls-assertion:
+    name: Row Level Security assertion
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: momo
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: ['5432:5432']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations
+        env:
+          PGPASSWORD: ci
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "applying $f"
+            psql -h localhost -U postgres -d momo -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Assert RLS is enabled on every table in public
+        env:
+          PGPASSWORD: ci
+        run: |
+          exposed=$(psql -h localhost -U postgres -d momo -At -c "
+            select count(*) from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relkind = 'r'
+              and c.relrowsecurity = false;")
+          echo "tables without RLS: $exposed"
+          if [ "$exposed" != "0" ]; then
+            psql -h localhost -U postgres -d momo -c "
+              select c.relname from pg_class c
+              join pg_namespace n on n.oid = c.relnamespace
+              where n.nspname = 'public' and c.relkind = 'r'
+                and c.relrowsecurity = false;"
+            exit 1
+          fi
+      - name: Assert anon holds no table privilege
+        env:
+          PGPASSWORD: ci
+        run: |
+          leaked=$(psql -h localhost -U postgres -d momo -At -c "
+            select count(*) from information_schema.role_table_grants
+            where grantee = 'anon' and table_schema = 'public';")
+          echo "anon grants: $leaked"
+          test "$leaked" = "0"
+
+  # ---------------------------------------------------------------------------
+  # Gate 3 — static analysis. Kotlin is covered by detekt plus Semgrep's
+  # security ruleset; the Android manifest is checked for cleartext traffic.
+  # ---------------------------------------------------------------------------
+  static-analysis:
+    name: SAST (detekt + semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # detekt needs a buildable Gradle module. The app sources are design-stage
+      # (no wrapper yet), so detekt is guarded and Semgrep carries the gate until
+      # the Gradle project lands.
+      - name: detekt (guarded until the Gradle wrapper lands)
+        run: |
+          if [ -f ./gradlew ]; then ./gradlew detekt --no-daemon; else
+            echo "no Gradle wrapper yet - detekt skipped, Semgrep is the active gate"; fi
+      - name: semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/kotlin
+            p/secrets
+
+  # ---------------------------------------------------------------------------
+  # Gate 4 — the app must build and the unit tests must pass before merge.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      # Same design-stage guard as Gate 3: this gate activates when the Gradle
+      # module lands. The algorithms demo is the buildable artefact today and is
+      # asserted by Gate 4a below.
+      - name: Assemble debug and test
+        run: |
+          if [ -f ./gradlew ]; then ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon; else
+            echo "no Gradle wrapper yet - build gate pending"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/
+
+  # Gate 4a — the algorithm layer IS buildable today, and its correctness
+  # assertions (implementation vs naive baseline) run on every push.
+  algo-demo:
+    name: Algorithm demo assertions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run demo with correctness assertions
+        run: python demo/run_demo.py
