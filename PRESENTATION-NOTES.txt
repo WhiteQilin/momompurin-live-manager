@@ -1,0 +1,57 @@
+REPOSITORY IS LIVE
+==================
+
+  https://github.com/WhiteQilin/momompurin-live-manager
+
+Public, default branch `main`, 28 files, CI all green (5/5 jobs).
+
+WHAT TO SHOW NOMAR
+------------------
+- One link covers both milestones. Say it that way: "this is the codebase
+  the IAS and ALGOCOM submissions refer to."
+
+- ALGOCOM demo (terminal, live):
+      python demo/run_demo.py
+  Prints all four algorithms with their speedups and asserts each against its
+  naive baseline. Exits non-zero if any answer differs - that assertion is the
+  point, not the speedup.
+  Files: algorithms/trie.py, inverted_index.py, fsm.py, expiry.py
+
+- IAS artefacts (all in docs/ on the repo):
+      PRIVACY_POLICY.md              DRAFT privacy policy, RA 10173
+      TERMS_AND_CONDITIONS.md        DRAFT terms
+      SECURITY_CONTROLS_CHECKLIST.md the checklist Nomar asked for
+      SECURITY-AUDIT.md              the Cloudflare security-audit skill pass
+                                     + OWASP Agentic Skills Top 10 table
+  Read them from the repo, not from a local file - the point is that they are
+  versioned with the code.
+
+- The PoC, if he wants it run live:
+      cd poc && npm install && node run_poc.mjs
+  Starts its own Postgres. Prints: anon read 8 customers -> 0 after hardening.
+
+- The CI tab is worth showing. The green RLS assertion job is a machine
+  proving every table has Row Level Security on a real Postgres instance.
+
+ONE HONEST CAVEAT TO SAY OUT LOUD IF ASKED
+-----------------------------------------
+The repo is design-stage: the algorithm layer, the database schema, and the
+security controls are real and runnable; the full Android app UI is still the
+Figma prototype, and the Gradle build lands when the app is cut. The checklist
+marks each control IMPLEMENTED / SPECIFIED / DESIGN-STAGE so nothing is
+overclaimed. The build gate in CI is guarded on ./gradlew for that reason.
+
+HOW THE TWO AGENT SKILLS WERE USED
+-----------------------------------
+- github.com/cloudflare/security-audit-skill - six-phase adversarial audit
+  (reconnaissance, coverage-led hunting, candidate validation, structured
+  findings, independent re-verification, reporting). Its pass over this
+  repository is docs/SECURITY-AUDIT.md: seven findings, each with an
+  action-taken and residual line.
+- github.com/OWASP/www-project-agentic-skills-top-10 - the AST10 framework.
+  Applied to our own agent tooling in the same document, section 2, because
+  the skills that audit the code are themselves agent skills.
+
+Both were also written into the PBL documents themselves:
+  IAS Revision 2   -> section 4, "Continuous audit through agent skills"
+  ALGOCOM report   -> the section before Task 6, plus a Contents row
