@@ -17,7 +17,7 @@ prototype.
 |---|---|
 | `algorithms/` | The four core algorithm implementations (see below) |
 | `algorithms/benchmark/` | The benchmark harness that produced the figures in the ALGOCOM report |
-| `demo/` | `python demo/run_demo.py` — runs all four algorithms on a synthetic catalogue and asserts each against its naive baseline |
+| `demo/` | `python demo/run_demo.py` — runs all four algorithms on the client catalogue, asserts each against its naive baseline, and ranks five matching algorithms on one query set |
 | `app/` | Kotlin sources for the data/session layer, plus the manifest controls |
 | `supabase/migrations/` | Shipped schema (`0001`) and the hardening migration (`0002`) |
 | `poc/` | Runnable proof of concept of the RLS defect and its fix: `node poc/run_poc.mjs` |
@@ -82,9 +82,13 @@ Requires Python 3.10+; no third-party packages.
 python demo/run_demo.py
 ```
 
-Reproducing the exact ALGOCOM benchmark figures requires the client's real
-workbook, which stays out of this repository; see the provenance note at the
-top of `algorithms/benchmark/bench_algocom_pbl.py`.
+`algorithms/benchmark/catalogue.csv` carries the client catalogue the benchmarks
+run on: 767 rows, SKU and item name only. Those are the two fields the retrieval
+engine reads and the two the shop already displays publicly in its live
+sessions. Cost, price, stock and every customer field are excluded, so the
+client's workbook itself is not in this repository; the provenance note at the
+top of `algorithms/benchmark/bench_algocom_pbl.py` explains how to point the
+full harness at a local copy.
 
 ## The four CI gates
 

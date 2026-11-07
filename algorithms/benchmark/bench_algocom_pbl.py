@@ -41,9 +41,11 @@ import openpyxl
 HERE = Path(__file__).resolve().parent
 ROOT = Path(r"C:\Users\Gabri\Desktop\Software Project (SOFTENG-HCI)")
 # The real benchmark ran against the client's own workbook (767 catalogue
-# rows), which stays out of this repository because it holds live business
-# data. Point WORKBOOK at a local copy of the workbook to reproduce the
-# figures quoted in the ALGOCOM PBL Milestone 1 report.
+# rows). The catalogue itself IS in this repository as
+# algorithms/benchmark/catalogue.csv, reduced to SKU and item name - the only
+# two fields this harness reads, and the two the shop already shows publicly
+# in its live sessions. Point WORKBOOK at a local copy of the workbook to run
+# the full harness including the pricing and stock columns.
 WORKBOOK = ROOT / "CLIENT ANSWERS" / "(LATEST)🌸 Momompurin Live Manager.xlsx"
 OUT = HERE / "algo_results_v2.json"
 
