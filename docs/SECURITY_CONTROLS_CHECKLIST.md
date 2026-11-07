@@ -67,6 +67,6 @@ instead and why it is the same control — matching Revision 2 §R.3.
 | No secrets in tree | `gitleaks detect --config security/gitleaks.toml` |
 | Agent-skill governance | `docs/SECURITY-AUDIT.md` §2 (OWASP AST10 self-assessment) |
 
-Counts: **14 implemented · 6 specified · 2 design-stage · 2 equivalent**,
+Counts: **15 implemented · 5 specified · 2 design-stage · 2 equivalent**,
 covering every line of the milestone's Confidentiality, Integrity, and
 Availability recommendation lists.
