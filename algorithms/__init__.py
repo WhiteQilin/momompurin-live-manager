@@ -22,6 +22,7 @@ from .trie import Trie
 from .inverted_index import InvertedIndex, jaccard, trigrams
 from .fsm import StockFSM, STATES, LEGAL
 from .expiry import DeadlineHeap
+from .tracking import validate_tracking, self_test as tracking_self_test
 
 __all__ = [
     "Trie",
@@ -32,4 +33,5 @@ __all__ = [
     "STATES",
     "LEGAL",
     "DeadlineHeap",
+    "validate_tracking",
 ]
