@@ -16,6 +16,24 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+      Bug 4 (real-phone report): the "Open" action on the export confirmation did
+      nothing on an Android 14/15 phone. Android 11's package-visibility rules mean
+      an app that has not declared what it wants to view cannot even SEE a PDF
+      viewer, so the ACTION_VIEW intent resolved to nothing. This block is what
+      makes a viewer visible to the query.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/pdf" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="image/png" />
+        </intent>
+    </queries>
+
     <application
         android:name=".MomompurinApp"
         android:allowBackup="false"
@@ -24,6 +42,7 @@
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Momompurin"

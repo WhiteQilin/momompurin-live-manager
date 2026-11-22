@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from the Figma Sticker Sheet. Tint at the call site through
+     MomoColors so no design hex is baked into the drawable. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+>
+    <path android:pathData="M5 18C3.89543 18 3 17.1046 3 16M5 18C5 19.1046 5.89543 20 7 20C8.10457 20 9 19.1046 9 18M5 18C5 16.8954 5.89543 16 7 16C8.10457 16 9 16.8954 9 18M9 18H13M3 5H11C12.1046 5 13 5.89543 13 7V8M13 8V12M13 8H16C16.6403 8 17.3597 8.35971 18 9L20 11C20.6403 11.6403 21 12.3597 21 13V16C21 17.1046 20.1046 18 19 18M13 12V18M13 12H20M13 18H15M19 18C19 19.1046 18.1046 20 17 20C15.8954 20 15 19.1046 15 18M19 18C19 16.8954 18.1046 16 17 16C15.8954 16 15 16.8954 15 18M3 9H9M3 13H7"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+</vector>

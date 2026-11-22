@@ -5,8 +5,32 @@ poc/package-lock.json
 
 # build output
 *.log
+build/
+.gradle/
+
+# android - machine-specific and generated
+local.properties
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.iml
+.idea/
+captures/
+.kotlin/
 
 # python
 __pycache__/
 *.pyc
 algorithms/benchmark/algo_results*.json
+
+# signing material - never commit a keystore or its passwords
+*.jks
+*.keystore
+*.p12
+release-signing.properties
+
+# scratch space for the build scripts: renders, crops, intermediate extracts.
+# Generated evidence that belongs in the repository goes under docs/visual_qa/,
+# which is tracked on purpose - 198 screenshots the audit reports cite.
+_tmp/

@@ -31,8 +31,13 @@ keywords = ["postgres", "postgresql"]
 [[rules]]
 id = "android-keystore-password"
 description = "Signing keystore credentials in a Gradle or properties file"
-regex = '''(?i)(storePassword|keyPassword)\s*[=:]\s*["']?[^\s"']{6,}'''
-keywords = ["storePassword", "keyPassword"]
+# Covers both spellings a signing key is stored in: the Gradle assignment
+# (`storePassword = ...`) and the properties key (`RELEASE_STORE_PASSWORD=`).
+# RE2, which gitleaks compiles with, has no lookahead, so this cannot itself
+# tell a literal from a reference; the references this project legitimately
+# writes are disarmed by the allowlist below.
+regex = '''(?i)(storePassword|keyPassword|[a-z_]*store_password|[a-z_]*key_password)\s*[=:]\s*["']?[^\s"']{6,}'''
+keywords = ["storePassword", "keyPassword", "STORE_PASSWORD", "KEY_PASSWORD"]
 
 [[rules]]
 id = "jwt-private-key"
@@ -41,13 +46,30 @@ regex = '''(?i)(jwt[_-]?secret|supabase[_-]?jwt)\s*[=:]\s*["'][^"']{16,}["']'''
 
 [allowlist]
 description = "Documented placeholders and synthetic PoC fixtures"
+# Path separators are matched with [\\/] because gitleaks reports Windows
+# paths with backslashes and CI reports them with forward slashes; a rule that
+# hardcodes one leaves the allowlist silently inert on the other platform.
 paths = [
-  '''poc/run_poc\.mjs''',          # synthetic keys marked POC_NOT_A_REAL_KEY
-  '''security/gitleaks\.toml''',   # this file describes the patterns
+  '''poc[\\/]run_poc\.mjs''',                    # synthetic keys marked POC_NOT_A_REAL_KEY
+  '''security[\\/]gitleaks\.toml''',             # this file describes the patterns
+  '''security[\\/]gitleaks-rules-test\.sh''',    # synthetic fixtures for the rule itself
   '''README\.md''',
 ]
+# regexTarget = "match" compares these against the whole matched text rather
+# than the rule's capture group. Without it the android-keystore-password rule
+# reports its secret as the bare word "storePassword", so no expression about
+# the assigned value could ever match.
+regexTarget = "match"
 regexes = [
   '''REPLACE_WITH_PROJECT_ANON_KEY''',
   '''POC_NOT_A_REAL_KEY''',
   '''<[A-Z_]+>''',
+  # References to signing material, not signing material. app/build.gradle.kts
+  # reads the keystore path and its passwords out of local.properties (which is
+  # gitignored) and passes the variables through; the only literal in that file
+  # is the `String?` type annotation. Allowlisting these shapes keeps the rule
+  # armed for a password pasted in by hand, which is the case it exists for.
+  # Verified with security/gitleaks-rules-test.sh.
+  '''(?i)\b(storePassword|keyPassword)\s*[=:]\s*release(Store|Key)Password\b''',
+  '''(?i)\b(storePassword|keyPassword)\s*[=:]\s*["']?String\?''',
 ]

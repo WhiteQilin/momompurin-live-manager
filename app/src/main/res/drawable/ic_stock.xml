@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from the Figma Sticker Sheet. Tint at the call site through
+     MomoColors so no design hex is baked into the drawable.
+
+     The Sticker Sheet draws this icon as an isometric cube in OUTLINE only: the
+     three visible top/front/side edges plus the interior seam. The converter also
+     emitted the outer silhouette as a second, SOLID-FILLED path, which rendered
+     the cube as a black hexagon in the bottom bar. The silhouette path is dropped;
+     the wireframe below is the icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="30"
+    android:viewportHeight="30">
+    <path android:pathData="M9.37502 5.27776L5.14305 7.36763C4.29 7.78889 3.75 8.65781 3.75 9.6092V20.3908C3.75 21.3422 4.29 22.2111 5.14305 22.6324L13.8931 26.9534C14.5908 27.2979 15.4092 27.2979 16.1069 26.9534L24.8569 22.6324C25.71 22.2111 26.25 21.3422 26.25 20.3908V15V9.6092C26.25 8.65781 25.71 7.78889 24.8569 7.36763L16.1069 3.04664C15.4092 2.70208 14.5908 2.70208 13.8931 3.04664L9.37502 5.27776ZM9.37502 5.27776L9.375 5.27775M9.37502 5.27776L20.625 10.8334M4.14988 8.253L15 13.6111M15 13.6111L20.625 10.8334M15 13.6111V27.2118M20.625 10.8334L25.8501 8.253M20.625 10.8334L20.625 10.8334"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+</vector>

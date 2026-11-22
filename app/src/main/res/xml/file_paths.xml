@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Invoice sharing goes through a content:// URI, so only the exported invoice
+  directory is exposed - never the app's private storage root.
+
+  The renderer writes to getExternalFilesDir(null)/invoices, which is an
+  EXTERNAL files dir. The previous roots declared only the internal files/ and
+  cache/ paths, so neither could ever match: a FileProvider lookup would throw
+  "Failed to find configured root" the moment invoice sharing was wired up.
+  This root is the one that actually contains the files.
+-->
+<paths>
+    <external-files-path name="invoices" path="invoices/" />
+    <!-- Kept so an export into files/exports would still resolve. -->
+    <files-path name="exports" path="exports/" />
+    <cache-path name="cache_exports" path="exports/" />
+</paths>

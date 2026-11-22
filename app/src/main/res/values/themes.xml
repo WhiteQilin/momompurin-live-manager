@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The form's surface comes from the token layer, not from this file: the
+      theme here only covers the window before Compose draws. #FFF0C2 is
+      Surface / Canvas.
+    -->
+    <style name="Theme.Momompurin" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+    </style>
+</resources>

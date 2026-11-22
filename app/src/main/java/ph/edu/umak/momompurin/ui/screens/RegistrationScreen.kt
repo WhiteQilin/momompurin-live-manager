@@ -1,0 +1,298 @@
+package ph.edu.umak.momompurin.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import ph.edu.umak.momompurin.data.AccountOps
+import ph.edu.umak.momompurin.data.MomoStore
+import ph.edu.umak.momompurin.ui.components.MomoButton
+import ph.edu.umak.momompurin.ui.components.MomoField
+import ph.edu.umak.momompurin.ui.components.MomoTopBar
+import ph.edu.umak.momompurin.ui.theme.MomoColors
+import ph.edu.umak.momompurin.ui.theme.MomoSpace
+import ph.edu.umak.momompurin.ui.theme.MomoType
+
+/**
+ * A-11: public Customer Registration.
+ *
+ * A-11 c7 is the structural rule: this screen offers NO role, admin or staff
+ * control, and [AccountOps.register] hard-codes [ph.edu.umak.momompurin.data.entity.Role.CUSTOMER].
+ * There is no code path from here to an Owner account.
+ *
+ * The fields are grouped the way the criteria list them - identity, contact,
+ * structured delivery address, then password - so a tester walking A-11's GWT can
+ * fill them top to bottom.
+ *
+ * C.1: the delivery address is the cascading Province -> City -> Barangay picker,
+ * not three free-text fields. C.2: the password is entered twice, each field with
+ * its own Show/Hide, and a mismatch blocks the registration inline before the
+ * store is ever asked.
+ */
+@Composable
+fun RegistrationScreen(
+    store: MomoStore,
+    onRegistered: () -> Unit,
+    onBack: () -> Unit,
+) {
+    var fullName by remember { mutableStateOf("") }
+    var handle by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var mobile by remember { mutableStateOf("") }
+    var province by remember { mutableStateOf("") }
+    var city by remember { mutableStateOf("") }
+    var barangay by remember { mutableStateOf("") }
+    var addressLine by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    // C.2: the mismatch is its own inline error under its own field, checked on
+    // every keystroke, so a tester sees it the moment the two diverge rather than
+    // only after tapping Create account.
+    val confirmMismatch = confirmPassword.isNotEmpty() && confirmPassword != password
+
+    fun submit() {
+        error = null
+        // C.2: the mismatch blocks BEFORE the store call, so the criterion's flow
+        // is visible at the field rather than as a generic failure banner.
+        if (confirmMismatch) {
+            error = "Passwords do not match."
+            return
+        }
+        if (password.length < AccountOps.MIN_PASSWORD_LENGTH) {
+            error = AccountOps.SHORT_PASSWORD
+            return
+        }
+        error = store.register(
+            AccountOps.Registration(
+                fullName = fullName,
+                handle = handle,
+                email = email,
+                mobile = mobile,
+                province = province,
+                city = city,
+                barangay = barangay,
+                addressLine = addressLine,
+                password = password,
+            ),
+        )
+        // A-11 c8: on success the Shop opens signed in as the new customer.
+        if (error == null) onRegistered()
+    }
+
+    Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
+        MomoTopBar(title = "Create an account", onBack = onBack)
+
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                // This screen has no bottom navigation, so it owns the system
+                // navigation-bar inset itself: without it, the last control
+                // ("Already have an account? Log in") lands under the gesture pill.
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(horizontal = MomoSpace.Lg, vertical = MomoSpace.Lg),
+        ) {
+            Text(
+                "Your details are saved so you do not retype them at checkout.",
+                style = MomoType.CaptionSmall,
+                color = MomoColors.TextSecondary,
+            )
+            Spacer(Modifier.height(MomoSpace.Lg))
+
+            MomoField(
+                value = fullName,
+                onValueChange = { fullName = it; error = null },
+                label = "Full name",
+                labelOutside = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+
+           // A-11 c1: "Messenger handle and/or TikTok handle" - optional, and the
+            // label says so rather than leaving the tester guessing.
+            MomoField(
+                value = handle,
+                onValueChange = { handle = it; error = null },
+                label = "Messenger or TikTok handle",
+                labelOutside = true,
+                supporting = "Optional, for example @elena",
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+
+            MomoField(
+                value = email,
+                onValueChange = { email = it; error = null },
+                label = "Email",
+                labelOutside = true,
+                keyboardType = KeyboardType.Email,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+
+            MomoField(
+                value = mobile,
+                onValueChange = { mobile = it; error = null },
+                label = "Mobile number",
+                labelOutside = true,
+                supporting = "11 digits, for example 0917 555 0199",
+                keyboardType = KeyboardType.Phone,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(MomoSpace.Xl))
+            Text(
+                "Delivery address",
+                style = MomoType.TitleSmall,
+                color = MomoColors.TextPrimary,
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+
+            // C.1: the cascading picker. The three fields and their clear-on-change
+            // rules live in the component, so this screen cannot re-derive them
+            // wrongly.
+            ph.edu.umak.momompurin.ui.components.PhAddressCascade(
+                province = province,
+                city = city,
+                barangay = barangay,
+                onChange = { p, c, b ->
+                    province = p
+                    city = c
+                    barangay = b
+                    error = null
+                },
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+            MomoField(
+                value = addressLine,
+                onValueChange = { addressLine = it; error = null },
+                label = "Full address",
+                labelOutside = true,
+                supporting = "House or unit number and street",
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(MomoSpace.Xl))
+            Text(
+                "Password",
+                style = MomoType.TitleSmall,
+                color = MomoColors.TextPrimary,
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+
+            MomoField(
+                value = password,
+                onValueChange = { password = it; error = null },
+                label = "Password",
+                labelOutside = true,
+                supporting = "At least 8 characters",
+                keyboardType = KeyboardType.Password,
+                visualTransformation = if (showPassword) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                imeAction = ImeAction.Next,
+                trailing = {
+                    LinkText(
+                        label = if (showPassword) "Hide" else "Show",
+                        onClick = { showPassword = !showPassword },
+                        style = MomoType.LabelChip,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(MomoSpace.Md))
+
+            // C.2: the second field, with its OWN Show/Hide and its own mismatch
+            // error - the criterion's "Both should have their own Show/Hide
+            // controls, ideally".
+            MomoField(
+                value = confirmPassword,
+                onValueChange = { confirmPassword = it; error = null },
+                label = "Confirm password",
+                labelOutside = true,
+                error = if (confirmMismatch) "Passwords do not match." else null,
+                keyboardType = KeyboardType.Password,
+                visualTransformation = if (showConfirm) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                imeAction = ImeAction.Done,
+                trailing = {
+                    LinkText(
+                        label = if (showConfirm) "Hide" else "Show",
+                        onClick = { showConfirm = !showConfirm },
+                        style = MomoType.LabelChip,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (error != null) {
+                Spacer(Modifier.height(MomoSpace.Md))
+                Text(
+                    error!!,
+                    style = MomoType.CaptionSmall,
+                    color = MomoColors.DangerInk,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(Modifier.height(MomoSpace.Xl))
+
+            MomoButton(
+                label = "Create account",
+                onClick = { submit() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(MomoSpace.Lg))
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Already have an account?",
+                    style = MomoType.CaptionSmall,
+                    color = MomoColors.TextSecondary,
+                )
+                Spacer(Modifier.width(MomoSpace.Xs))
+                LinkText(label = "Log in", onClick = onBack)
+            }
+
+            Spacer(Modifier.height(MomoSpace.Xxl))
+        }
+    }
+}
