@@ -17,9 +17,31 @@ create schema if not exists auth;
 
 -- Supabase's auth.uid() reads the JWT "sub" claim from the connection GUC.
 -- Reproduced here so the policies in 0002 are the same text that ships.
-create or replace function auth.uid() returns uuid
-language sql stable as $$
-  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+--
+-- On a hosted Supabase project this must NOT run. The platform already provides
+-- auth.uid(), auth.jwt() and auth.role(), owned by supabase_admin, and the role
+-- we connect as (`postgres`) is not a superuser and holds no CREATE privilege on
+-- the auth schema. Defining them raises "permission denied for schema auth" and
+-- aborts the migration - measured, not assumed, on PostgreSQL 17.12.
+--
+-- The guard keys on the function already existing rather than on "is this
+-- Supabase": a bare Postgres (CI, or the local harness) has no auth.uid() and
+-- still needs the reproduction, while a hosted project has one and must be left
+-- alone. Both paths then yield the same policies with the same semantics, which
+-- is the point of reproducing it at all.
+do $$
+begin
+  if to_regprocedure('auth.uid()') is null then
+    execute $fn$
+      create or replace function auth.uid() returns uuid
+      language sql stable as $body$
+        select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      $body$
+    $fn$;
+  else
+    raise notice 'auth.uid() provided by the platform - reproduction skipped';
+  end if;
+end;
 $$;
 
 -- ---------------------------------------------------------------- tables ----

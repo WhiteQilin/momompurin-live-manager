@@ -13,12 +13,29 @@
 -- ============================================================================
 
 -- JWT claims are delivered by PostgREST in a GUC; mirror that for the harness.
-grant usage on schema auth to anon, authenticated, service_role;
-
-create or replace function auth.jwt() returns jsonb
-language sql stable as $$
-  select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb)
+--
+-- On a hosted Supabase project the platform already granted usage on auth and
+-- already defines auth.jwt(), so both statements are skipped. `grant usage` is
+-- harmless there (it warns "no privileges were granted"), but defining
+-- auth.jwt() is not: it fails with "permission denied for schema auth" because
+-- the auth schema is owned by supabase_admin. Guarding on the function's
+-- existence covers both the hosted and the bare-Postgres case.
+do $$
+begin
+  if to_regprocedure('auth.jwt()') is null then
+    execute $fn$
+      create or replace function auth.jwt() returns jsonb
+      language sql stable as $body$
+        select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb)
+      $body$
+    $fn$;
+  else
+    raise notice 'auth.jwt() provided by the platform - reproduction skipped';
+  end if;
+end;
 $$;
+
+grant usage on schema auth to anon, authenticated, service_role;
 
 -- The owner account is the only account the Phase 1 app can create. The claim
 -- is set by the Supabase Auth hook at sign-up, not by the client, so a modified

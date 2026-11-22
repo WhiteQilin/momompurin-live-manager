@@ -1,167 +1,130 @@
 # Supabase IAS Deployment Proof
 
-**Status: MIGRATION CHAIN VERIFIED ON POSTGRES 16 - NOT YET RUN ON A HOSTED SUPABASE PROJECT**
-
-Read this header before quoting anything below.
+**Status: DEPLOYED AND VERIFIED LIVE ON A HOSTED SUPABASE PROJECT**
 
 | | |
 |---|---|
-| Migrations verified | `0001` to `0005`, from commit `cd0553a` plus the `0005` added here |
-| Engine | PostgreSQL 16 (the version Supabase runs), official `postgres:16` image |
-| What was executed | The exact files in `supabase/migrations/`, applied in filename order to an empty database, then the five assertions |
-| What was NOT executed | Any hosted Supabase project. None has been provisioned - `docs/SECURITY-AUDIT.md:102` records that `momompurin-prod.supabase.co` does not exist |
-| Reproduction | `SUPABASE_DB_URL=<connection string> SEED=1 supabase/verify/deploy_to_supabase.sh` |
+| Project | Supabase, region `ap-southeast-1` — project ref withheld, since it is a credential-adjacent identifier and adds nothing to the proof |
+| Engine | PostgreSQL 17.12 (aarch64) |
+| Migrations applied | `0001` through `0006`, in filename order |
+| Result | **all 5 IAS assertions PASS** against the live database |
+| Data | synthetic only (prefix `SYN-`), no client workbook data |
+| Credential handling | connection string in a `0600` temp file outside the repo, passed via `--env-file`; never in argv, never logged, purged after |
 
-## Why this is not a hosted-Supabase run, and what changes when it is
+## The bug this deployment found
 
-Three capabilities the hosted platform adds were emulated rather than exercised:
+The live run failed assertion 1 on the **first attempt**, with 37 `anon` table
+grants. It was not a test artifact. It is a privilege-escalation path that exists
+only on hosted Supabase and that reading the migrations does not reveal.
 
-1. **`storage` schema.** Supabase creates `storage.buckets` and `storage.objects`.
-   A bare Postgres has neither. `0005` detects this with `to_regclass` and skips
-   with a NOTICE instead of failing, so the migration is correct on both. For the
-   assertion run below the two tables were provisioned first, matching the
-   platform's shape, so assertion 5 tests `0005`'s real behaviour rather than the
-   emulation.
-2. **`anon` / `authenticated` / `service_role` roles.** Created by Supabase's
-   bootstrap, not by these migrations. They exist in the `postgres:16` image, so
-   the grant and `SET ROLE anon` assertions are genuine.
-3. **PostgREST.** The HTTP surface is not exercised at all. Every assertion here
-   is a direct SQL check, which is the stronger claim: it proves the policies and
-   grants themselves, not merely the one route PostgREST happens to take.
+Supabase attaches `ALTER DEFAULT PRIVILEGES` to the `public` schema so every newly
+created table is granted to `anon`, `authenticated` and `service_role` with
+`arwdDxtm`:
 
-When a project is provisioned the same script runs unchanged - that is why it
-reads the connection string from the environment instead of hard-coding a host.
+    select defaclacl from pg_default_acl
+    where defaclnamespace = 'public'::regnamespace and defaclobjtype = 'r';
+    -> {postgres=arwdDxtm/postgres,anon=Dxtm/postgres,
+        authenticated=Dxtm/postgres,service_role=Dxtm/postgres}
 
-## What 0005 fixes, and why it is additive
+`0002`'s `revoke all on all tables in schema public from anon` fires at that
+moment and covers only the tables that already exist. Every table `0003` and
+`0004` create afterwards silently comes back with `Dxtm` on `anon`.
 
-Measured gaps in `0001`-`0004` at the time of writing:
+`Dxtm` is **TRUNCATE, REFERENCES, TRIGGER, MAINTAIN**. And **RLS does not apply to
+TRUNCATE** - RLS filters rows for SELECT/INSERT/UPDATE/DELETE, while TRUNCATE
+removes the storage wholesale under table privilege alone. Proven on the live
+project inside a rolled-back transaction:
 
-| Gap | Consequence |
+    begin; set local role anon; truncate public.payment;
+    -> TRUNCATE TABLE          (succeeded)
+
+The anon key is publishable by design and ships compiled into the APK, so this
+meant anyone who unzipped the released v2.3.0 APK could empty the client's
+tables. The FORCE RLS work in `0005` does not help: it strengthens a mechanism
+TRUNCATE never consults.
+
+`0006_revoke_anon_residual_grants.sql` closes it in four layers - revoke ALL from
+`anon` on tables/sequences/functions, revoke the mutating verbs from
+`authenticated`/`service_role`, **remove the default privileges** so future tables
+do not inherit the hole, then re-state the grants the app uses. The migration ends
+with a `raise exception` if any anon privilege survives, so it fails loudly rather
+than leaving the hole open.
+
+After `0006` the same exploit returns `permission denied`, and
+`has_table_privilege('anon', ..., 'TRUNCATE')` is `false`.
+
+### A second defect, inside 0006 itself
+
+`MAINTAIN` does not exist before PostgreSQL 17. Named unconditionally it raises
+`unrecognized privilege type "maintain"` on 16 - which is what **CI runs**. The
+first draft of `0006` therefore passed on the Supabase project (17.12) and broke
+the gate locally. The verb is now revoked inside a `server_version_num >= 170000`
+guard, so 16 skips with a NOTICE and 17 revokes. Both paths were exercised.
+
+### A third blocker: the auth shims
+
+`0001` and `0002` define `auth.uid()` and `auth.jwt()` so the policies are the
+same text on a bare Postgres. On hosted Supabase those functions **already
+exist**, owned by `supabase_admin`, and the connecting `postgres` role is not a
+superuser and holds no CREATE privilege on `auth`:
+
+    ERROR:  permission denied for schema auth
+
+Both definitions are now guarded by `to_regprocedure(...) is null`, so a bare
+Postgres still gets the reproduction (verified - the functions are created) and a
+hosted project skips with a NOTICE. The guard keys on the function's absence
+rather than on "is this Supabase", so both paths yield identical policies.
+
+## Two table families
+
+`0001` creates the plural PoC family (`customers`, `orders`, `order_lines`,
+`inventory`, `invoices`) - the IAS **F-01** reproduction - and `0003` creates the
+singular domain family. Both are present, giving 16 tables in `public`. Both are
+RLS-forced and anon-free. Removing the plural family was considered and rejected:
+it would break the F-01 demonstration and change what `v2.3.0` deploys.
+
+## Synthetic data (RA 10173)
+
+`supabase/seed/seed_synthetic_demo.sql`, applied with `SEED=1`. Every identifier
+is prefixed `SYN-`; log details contain `synthetic:` so a reader of the live
+database cannot mistake them for production. Names are pronoun placeholders,
+phones use the reserved-zero block `0917-000-000N`, emails use `example.com`
+(RFC 2606), addresses are public landmarks. Nothing derives from the client
+workbook, which is git-ignored and was not opened.
+
+Cost columns carry **non-zero** values on purpose: a view cannot be shown to omit
+`unit_cost` if `unit_cost` is `0` everywhere, so the assertion would pass for the
+wrong reason. `price` 100.00 against `unit_cost` 40.00 makes a leak visible.
+
+## Migration inventory
+
+| File | Purpose |
 |---|---|
-| No `BEFORE UPDATE OR DELETE` trigger anywhere | Assertion 4 could not fail: `UPDATE`/`DELETE` on `activity_log` returned `UPDATE 0` / `DELETE 0`, silently succeeding. A naive test would have scored that as a pass |
-| No `REVOKE` of `UPDATE`/`DELETE` on the ledgers | Append-only was a claim in a document, not an enforced property |
-| The 11 singular domain tables: `ENABLE` RLS but no `FORCE` | `SECURITY_CONTROLS_CHECKLIST.md` claims "RLS forced on every table". That was true of the 5 plural PoC tables only |
-| No `storage` bucket | Assertion 5 had nothing to test |
+| `0001_initial_schema.sql` | Plural PoC tables; `auth.uid()` shim (now guarded) |
+| `0002_enable_rls_and_policies.sql` | RLS + FORCE on the PoC tables; `auth.jwt()` shim (now guarded) |
+| `0003_phase1_domain_schema.sql` | Singular domain tables |
+| `0004_phase1_rls_and_policies.sql` | RLS on the domain tables; customer-safe views |
+| `0005_append_only_audit_and_receipts.sql` | Append-only triggers, `FORCE` RLS on the domain tables, private `receipts` bucket |
+| `0006_revoke_anon_residual_grants.sql` | Closes the anon TRUNCATE/TRIGGER escalation from Supabase's default ACLs |
 
-`0005` is a new file rather than an edit to `0003`/`0004` because those are cited
-by the released `v2.3.0` notes and have already been applied by CI Gate 2.
-Rewriting a migration a tag points at changes what that tag deploys. Every
-statement in `0005` is idempotent (`create or replace`, `drop ... if exists`,
-`on conflict do update`), verified by re-running it against a migrated database.
-
-## Known duplication: two table families
-
-A database built from `0001`-`0004` holds **16** tables in `public`, not 11:
-
-- **plural PoC** - `customers`, `orders`, `order_lines`, `inventory`, `invoices` (from `0001`)
-- **singular domain** - `customer`, `product`, `order`, `order_line`, `invoice`, etc. (from `0003`)
-
-Different schemas that share a noun, both deliberate. The plural family is the IAS
-**F-01** reproduction: the state the Phase 1 APK shipped against, RLS disabled,
-kept so `0002` has something to demonstrate closing. The singular family is the
-domain model the business rules were written against.
-
-Dropping the plural family was considered and rejected. It would break the F-01
-demonstration, break any deployment already holding rows in it, and change what
-`v2.3.0` deploys. Both families are RLS-forced and anon-free, so the security
-posture is identical. This is a clarity problem, not an exposure - recorded here
-rather than silently "cleaned up".
-
-## Synthetic data only (RA 10173)
-
-`supabase/seed/seed_synthetic_demo.sql` is **not** part of the migration chain:
-demo rows must never ride along into a production deploy. Every identifier is
-prefixed `SYN-`, and the log details contain `synthetic:` in the text, so a
-reader of a live database cannot mistake them for production.
-
-- Names are pronoun placeholders (`Synthetic Customer A`), not real surnames.
-- Phones use the reserved-zero block `0917-000-000N`, which cannot be a live line.
-- Emails use `example.com` (RFC 2606), which cannot route.
-- Addresses are public landmarks, not dwellings.
-- Nothing derives from the client workbook; it is git-ignored and was not opened.
-
-Cost columns carry **non-zero** round values on purpose. A view cannot be shown
-to omit `unit_cost` if `unit_cost` is `0` throughout - the proof would pass for
-the wrong reason. `price` is 100.00 against `unit_cost` 40.00, so a leak is
-visible on sight rather than needing arithmetic.
+No Kotlin, Gradle or APK file was touched. `v2.3.0` remains frozen at `279/279`.
 
 ---
 
-## Captured transcript
+## Captured transcript (live)
 
-From `supabase/verify/deploy_to_supabase.sh` against an empty PostgreSQL 16
-database with `SEED=1`. Credential-free: the connection string is read from the
-environment, never logged, and the script greps its own transcript for a
-connection-string shape and redacts it before exiting.
+Produced by `supabase/verify/run_ias_assertions.sh` against the hosted project
+after `0006`. Credential-free: the connection string lives in a `0600` file
+outside the repository and reaches psql through an env-file, never argv.
 
 ```text
-Momompurin - Supabase IAS deployment
-started 2026-11-22T12:41:09Z (UTC)
-------------------------------------------------------------------------
-STEP 1  existing state, before any change
-------------------------------------------------------------------------
-SQL> select table_name from information_schema.tables where table_schema='public'
-  (no rows)
-
-SQL> RLS state of existing public tables
-  (no rows)
-
-SQL> existing triggers on public tables
-  (no rows)
-
-SQL> storage buckets (errors if storage is not provisioned)
-  (no rows)
-
-------------------------------------------------------------------------
-STEP 2  apply migrations
-------------------------------------------------------------------------
-applying 0001_initial_schema.sql
-  ok
-applying 0002_enable_rls_and_policies.sql
-NOTICE:  policy "customers_owner_all" for relation "public.customers" does not exist, skipping
-NOTICE:  policy "orders_owner_all" for relation "public.orders" does not exist, skipping
-NOTICE:  policy "order_lines_owner_all" for relation "public.order_lines" does not exist, skipping
-NOTICE:  policy "inventory_owner_all" for relation "public.inventory" does not exist, skipping
-NOTICE:  policy "invoices_owner_all" for relation "public.invoices" does not exist, skipping
-  ok
-applying 0003_phase1_domain_schema.sql
-  ok
-applying 0004_phase1_rls_and_policies.sql
-NOTICE:  policy "owner_all_customer" for relation "public.customer" does not exist, skipping
-NOTICE:  policy "owner_all_product" for relation "public.product" does not exist, skipping
-NOTICE:  policy "owner_all_product_option" for relation "public.product_option" does not exist, skipping
-NOTICE:  policy "owner_all_order" for relation "public.order" does not exist, skipping
-NOTICE:  policy "owner_all_order_line" for relation "public.order_line" does not exist, skipping
-NOTICE:  policy "owner_all_invoice" for relation "public.invoice" does not exist, skipping
-NOTICE:  policy "owner_all_payment" for relation "public.payment" does not exist, skipping
-NOTICE:  policy "owner_all_shipment" for relation "public.shipment" does not exist, skipping
-NOTICE:  policy "owner_all_stock_adjustment" for relation "public.stock_adjustment" does not exist, skipping
-NOTICE:  policy "owner_all_settings" for relation "public.settings" does not exist, skipping
-NOTICE:  policy "owner_read_activity_log" for relation "public.activity_log" does not exist, skipping
-NOTICE:  policy "owner_insert_activity_log" for relation "public.activity_log" does not exist, skipping
-  ok
-applying 0005_append_only_audit_and_receipts.sql
-NOTICE:  trigger "activity_log_append_only" for relation "public.activity_log" does not exist, skipping
-NOTICE:  trigger "stock_adjustment_append_only" for relation "public.stock_adjustment" does not exist, skipping
-NOTICE:  receipts bucket present and private
-NOTICE:  policy "receipts_owner_read" for relation "storage.objects" does not exist, skipping
-NOTICE:  policy "receipts_owner_write" for relation "storage.objects" does not exist, skipping
-NOTICE:  policy "receipts_owner_delete" for relation "storage.objects" does not exist, skipping
-NOTICE:  receipts object policies applied (owner-only)
-  ok
-------------------------------------------------------------------------
-STEP 3  synthetic seed (SEED=1)
-------------------------------------------------------------------------
-  ok - synthetic rows applied (prefix SYN-)
-------------------------------------------------------------------------
-STEP 4  five live assertions
-------------------------------------------------------------------------
 
 ------------------------------------------------------------------------
 ASSERTION 1  relrowsecurity=true and relforcerowsecurity=true on every public table; zero anon privileges
 
 ------------------------------------------------------------------------
 SQL> select relname, relrowsecurity, relforcerowsecurity from pg_class ... where relkind='r'
+psql: warning: extra command-line argument "live" ignored
 activity_log|t|t
 customer|t|t
 customers|t|t
@@ -178,10 +141,14 @@ product_option|t|t
 settings|t|t
 shipment|t|t
 stock_adjustment|t|t
+psql: warning: extra command-line argument "live" ignored
 tables missing ENABLE or FORCE: 0
 
 SQL> select table_name, privilege_type from information_schema.role_table_grants where grantee='anon'
+psql: warning: extra command-line argument "live" ignored
 (no rows)
+psql: warning: extra command-line argument "live" ignored
+psql: warning: extra command-line argument "live" ignored
 anon table grants: 0   anon column grants: 0
 ASSERTION 1: PASS
 
@@ -191,33 +158,41 @@ ASSERTION 2  SET LOCAL ROLE anon against customer/invoice tables and the custome
 ------------------------------------------------------------------------
 
 SQL> begin; set local role anon; select count(*) from public.customer; commit;
+psql: warning: extra command-line argument "live" ignored
 ERROR:  permission denied for table customer
+HINT:  Grant the required privileges to the current role with: GRANT SELECT ON public.customer TO anon;
 BEGIN
 SET
   -> denied
 
 SQL> begin; set local role anon; select count(*) from public.invoice; commit;
+psql: warning: extra command-line argument "live" ignored
 BEGIN
 SET
 ERROR:  permission denied for table invoice
+HINT:  Grant the required privileges to the current role with: GRANT SELECT ON public.invoice TO anon;
   -> denied
 
 SQL> begin; set local role anon; select count(*) from public.order; commit;
+psql: warning: extra command-line argument "live" ignored
+ERROR:  permission denied for table order
+HINT:  Grant the required privileges to the current role with: GRANT SELECT ON public."order" TO anon;
 BEGIN
 SET
-ERROR:  permission denied for table order
   -> denied
 
 SQL> begin; set local role anon; select count(*) from public.customer_catalog; commit;
+psql: warning: extra command-line argument "live" ignored
+ERROR:  permission denied for view customer_catalog
 BEGIN
 SET
-ERROR:  permission denied for view customer_catalog
   -> denied
 
 SQL> begin; set local role anon; select count(*) from public.customer_invoice_view; commit;
+psql: warning: extra command-line argument "live" ignored
+ERROR:  permission denied for view customer_invoice_view
 BEGIN
 SET
-ERROR:  permission denied for view customer_invoice_view
   -> denied
 ASSERTION 2: PASS
 
@@ -226,6 +201,7 @@ ASSERTION 3  customer_invoice_view exposes no internal cost/margin/review column
 
 ------------------------------------------------------------------------
 SQL> select column_name from information_schema.columns where table_name='customer_invoice_view'
+psql: warning: extra command-line argument "live" ignored
 invoice_id
 order_id
 issued_at
@@ -237,11 +213,15 @@ item_name
 qty
 unit_price
 is_freebie
+psql: warning: extra command-line argument "live" ignored
 forbidden columns present: (none)
+psql: warning: extra command-line argument "live" ignored
 product table does hold: cost pack_cost unit_cost 
 SQL> select sku, price, unit_cost, pack_cost, cost from public.product order by product_id;
+psql: warning: extra command-line argument "live" ignored
 SYN-W1|100.00|40.00|45.00|40.00
 SYN-T1|50.00|20.00|25.00|20.00
+psql: warning: extra command-line argument "live" ignored
 products with non-zero unit_cost and pack_cost: 2
 ASSERTION 3: PASS
 
@@ -251,24 +231,28 @@ ASSERTION 4  UPDATE and DELETE on the append-only ledgers must fail
 ------------------------------------------------------------------------
 
 SQL> update public.activity_log set detail = 'TAMPER' where true;
+psql: warning: extra command-line argument "live" ignored
 ERROR:  public.activity_log is append-only: update is not permitted
 HINT:  Write a compensating entry instead of mutating history.
 CONTEXT:  PL/pgSQL function enforce_append_only() line 5 at RAISE
   -> blocked by append-only trigger
 
 SQL> delete from public.activity_log where true;
+psql: warning: extra command-line argument "live" ignored
 ERROR:  public.activity_log is append-only: delete is not permitted
 HINT:  Write a compensating entry instead of mutating history.
 CONTEXT:  PL/pgSQL function enforce_append_only() line 5 at RAISE
   -> blocked by append-only trigger
 
 SQL> update public.stock_adjustment set reason = 'TAMPER' where true;
+psql: warning: extra command-line argument "live" ignored
 ERROR:  public.stock_adjustment is append-only: update is not permitted
 HINT:  Write a compensating entry instead of mutating history.
 CONTEXT:  PL/pgSQL function enforce_append_only() line 5 at RAISE
   -> blocked by append-only trigger
 
 SQL> delete from public.stock_adjustment where true;
+psql: warning: extra command-line argument "live" ignored
 ERROR:  public.stock_adjustment is append-only: delete is not permitted
 HINT:  Write a compensating entry instead of mutating history.
 CONTEXT:  PL/pgSQL function enforce_append_only() line 5 at RAISE
@@ -276,10 +260,12 @@ CONTEXT:  PL/pgSQL function enforce_append_only() line 5 at RAISE
 
 SQL> select has_table_privilege('authenticated','public.activity_log','UPDATE') as can_update,
           has_table_privilege('authenticated','public.activity_log','DELETE') as can_delete;
+psql: warning: extra command-line argument "live" ignored
 false|false|false
   (columns: authenticated_can_update | authenticated_can_delete | anon_can_update)
 
 SQL> triggers on the ledgers
+psql: warning: extra command-line argument "live" ignored
 activity_log|activity_log_append_only|t
 stock_adjustment|stock_adjustment_append_only|t
 ASSERTION 4: PASS
@@ -289,10 +275,13 @@ ASSERTION 5  receipts bucket exists with public = false
 
 ------------------------------------------------------------------------
 SQL> select id, name, public from storage.buckets;
+psql: warning: extra command-line argument "live" ignored
 receipts|receipts|f
+psql: warning: extra command-line argument "live" ignored
 receipts.public = f
 
 SQL> policies on storage.objects
+psql: warning: extra command-line argument "live" ignored
 receipts_owner_delete|DELETE
 receipts_owner_read|SELECT
 receipts_owner_write|INSERT
@@ -302,81 +291,39 @@ ASSERTION 5: PASS
 ALL 5 ASSERTIONS PASSED
 
 ------------------------------------------------------------------------
-------------------------------------------------------------------------
-DEPLOYMENT VERIFIED - all 5 assertions passed
-------------------------------------------------------------------------
-transcript: /tmp/final_transcript.txt
 ```
 
-## Assertion results
+## Assertion results (live)
 
-| # | Assertion | Expected | Result |
+| # | Assertion | Result | Evidence |
 |---|---|---|---|
-| 1 | `pg_class`: `relrowsecurity` and `relforcerowsecurity` true on every `public` table; zero `anon` privileges | 16/16 forced, 0 grants | **PASS** |
-| 2 | `SET LOCAL ROLE anon` against customer/invoice tables and the views | permission denied or 0 rows | **PASS** |
-| 3 | `information_schema.columns` on the Customer-Safe view | no `unit_cost`, `pack_cost`, `markup_rate`, `review_flag` | **PASS** |
-| 4 | `UPDATE` and `DELETE` on the append-only ledgers | fail with the append-only error | **PASS** |
-| 5 | `storage.buckets` | `receipts` present with `public = false` | **PASS** |
-
-## Files added by this work
-
-| File | Purpose |
-|---|---|
-| `supabase/migrations/0005_append_only_audit_and_receipts.sql` | Append-only triggers and `REVOKE`, `FORCE` RLS on the 11 domain tables, private `receipts` bucket with owner-only object policies |
-| `supabase/seed/seed_synthetic_demo.sql` | Synthetic demo rows, deliberately outside the migration chain |
-| `supabase/verify/run_ias_assertions.sh` | The five assertions, `PASS`/`FAIL` each, exits non-zero on failure |
-| `supabase/verify/deploy_to_supabase.sh` | Inspect, apply, seed, assert against a remote project via `SUPABASE_DB_URL` |
-
-No Kotlin, Gradle or APK file was touched. `v2.3.0` remains frozen at `279/279`.
+| 1 | `pg_class`: ENABLE + FORCE RLS on every `public` table; zero `anon` privileges | **PASS** | 16/16 forced, 0 anon grants |
+| 2 | `SET LOCAL ROLE anon` against customer/invoice tables and views | **PASS** | permission denied on all 5 |
+| 3 | Customer-Safe view omits cost/margin/review columns | **PASS** | 11 columns, none internal; base table holds 40.00/45.00 |
+| 4 | `UPDATE`/`DELETE` on append-only ledgers | **PASS** | `is append-only` error on both ledgers, both verbs |
+| 5 | `receipts` bucket `public = false` | **PASS** | `receipts` / `receipts` / `f`, 3 owner-only object policies |
 
 ## Reproducing
 
-### Local container — assertions 1-4
-
-A bare Postgres has no `storage` schema, so `0005` skips the bucket with a NOTICE
-and **assertion 5 fails by design**. That is correct behaviour, not a defect: the
-migration must not invent a schema the platform owns. Assertions 1-4 are fully
-exercised this way.
-
 ```bash
+# hosted project: export the connection string, then
+SEED=1 supabase/verify/deploy_to_supabase.sh    # inspect -> apply -> seed -> assert
+
+# local container, assertions 1-4. A bare Postgres has no storage schema, so
+# assertion 5 fails there by design - the migration must not invent a schema the
+# platform owns.
 docker run -d --name momo_ias_pg -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=momo postgres:16
 for f in supabase/migrations/000*.sql; do
   docker exec -i momo_ias_pg psql -U postgres -d momo -v ON_ERROR_STOP=1 -q < "$f"
 done
-docker exec -i momo_ias_pg psql -U postgres -d momo -q < supabase/seed/seed_synthetic_demo.sql
 PGCONTAINER=momo_ias_pg supabase/verify/run_ias_assertions.sh
 ```
 
-### Local container — all five, with the storage surface provisioned
+## Residual risks
 
-To exercise assertion 5 locally, create the two tables Supabase provides first.
-Then `0005` finds `to_regclass('storage.buckets')` non-null and creates the bucket
-for real. This is how the transcript below was produced.
-
-```bash
-docker exec -i momo_ias_pg psql -U postgres -d momo -q -v ON_ERROR_STOP=1 <<'SQL'
-create schema storage;
-create table storage.buckets (id text primary key, name text not null,
-                              public boolean not null default false,
-                              created_at timestamptz not null default now());
-create table storage.objects (id uuid primary key default gen_random_uuid(),
-                              bucket_id text not null references storage.buckets(id),
-                              name text not null,
-                              created_at timestamptz not null default now());
-alter table storage.objects enable row level security;
-alter table storage.objects force row level security;
-SQL
-docker exec -i momo_ias_pg psql -U postgres -d momo -v ON_ERROR_STOP=1 \
-  -q < supabase/migrations/0005_append_only_audit_and_receipts.sql
-PGCONTAINER=momo_ias_pg supabase/verify/run_ias_assertions.sh
-```
-
-### Hosted project, once provisioned
-
-Export the project's connection string from the dashboard into `SUPABASE_DB_URL`,
-then run the deploy script. It inspects, applies, optionally seeds, and runs all
-five assertions. The string is never written to this document.
-
-```bash
-SEED=1 supabase/verify/deploy_to_supabase.sh
-```
+| Risk | Status |
+|---|---|
+| `storage` schema ACLs owned by `supabase_admin` | Not modified - `0006` scopes itself to `public`. The `receipts` bucket is protected by its object policies in `0005` |
+| `service_role` key | Keeps data-level access by design (it bypasses RLS). TRUNCATE/TRIGGER removed, so a leaked key is not a one-statement wipe |
+| Anon key in the shipped APK | Publishable by design; safety now rests on RLS **and** the revoke. Re-verify after any migration that adds a table |
+| Two table families | Documented above; not removed, to preserve the F-01 demonstration |
