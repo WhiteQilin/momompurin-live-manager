@@ -70,6 +70,7 @@ fi
 # 2 --------------------------------------------------------------- anon role --
 head2 "ASSERTION 2  SET LOCAL ROLE anon against customer/invoice tables and the customer views"
 
+a2_fail=0
 for target in public.customer public.invoice public."order" public.customer_catalog public.customer_invoice_view; do
   echo ""
   echo "SQL> begin; set local role anon; select count(*) from $target; commit;"
@@ -82,9 +83,10 @@ for target in public.customer public.invoice public."order" public.customer_cata
   elif echo "$out" | grep -qxE "0"; then
     echo "  -> 0 rows"
   else
-    echo "  -> LEAK OR UNEXPECTED RESULT"; fail=1
+    echo "  -> LEAK OR UNEXPECTED RESULT"; a2_fail=1
   fi
 done
+if [ "$a2_fail" -eq 0 ]; then echo "ASSERTION 2: PASS"; else echo "ASSERTION 2: FAIL"; fail=1; fi
 
 # 3 ------------------------------------------------------------ view columns --
 head2 "ASSERTION 3  customer_invoice_view exposes no internal cost/margin/review column"
@@ -129,6 +131,7 @@ head2 "ASSERTION 4  UPDATE and DELETE on the append-only ledgers must fail"
 # look like a pass while proving nothing).
 #   activity_log      -> detail
 #   stock_adjustment  -> reason
+a4_fail=0
 for pair in "public.activity_log:detail" "public.stock_adjustment:reason"; do
   tbl=${pair%%:*}; col=${pair##*:}
   for op in "update $tbl set $col = 'TAMPER' where true" "delete from $tbl where true"; do
@@ -139,7 +142,7 @@ for pair in "public.activity_log:detail" "public.stock_adjustment:reason"; do
     if echo "$out" | grep -q "is append-only"; then
       echo "  -> blocked by append-only trigger"
     else
-      echo "  -> NOT BLOCKED"; fail=1
+      echo "  -> NOT BLOCKED"; a4_fail=1
     fi
   done
 done
@@ -147,9 +150,18 @@ done
 echo ""
 echo "SQL> select has_table_privilege('authenticated','public.activity_log','UPDATE') as can_update,"
 echo "          has_table_privilege('authenticated','public.activity_log','DELETE') as can_delete;"
-q -c "select has_table_privilege('authenticated','public.activity_log','UPDATE') as can_update,
-             has_table_privilege('authenticated','public.activity_log','DELETE') as can_delete,
-             has_table_privilege('anon','public.activity_log','UPDATE') as anon_can_update;"
+privs=$(q -c "select has_table_privilege('authenticated','public.activity_log','UPDATE')::text||'|'||
+                     has_table_privilege('authenticated','public.activity_log','DELETE')::text||'|'||
+                     has_table_privilege('anon','public.activity_log','UPDATE')::text;")
+echo "$privs"
+echo "  (columns: authenticated_can_update | authenticated_can_delete | anon_can_update)"
+# false|false|false is the expected reading: no role holds a mutating verb on the
+# ledger. Compared against the word form because ::text yields 'false', while a
+# bare boolean in unaligned output would print 'f' - matching both would need a
+# normalisation step that hides a real difference.
+if [ "$privs" != "false|false|false" ]; then
+  echo "  -> a role still holds UPDATE or DELETE on the ledger"; a4_fail=1
+fi
 
 echo ""
 echo "SQL> triggers on the ledgers"
@@ -158,6 +170,8 @@ q -c "select c.relname, t.tgname, pg_get_triggerdef(t.oid) is not null as has_de
       join pg_namespace n on n.oid = c.relnamespace
       where n.nspname='public' and not t.tgisinternal and c.relname in ('activity_log','stock_adjustment')
       order by c.relname, t.tgname;"
+
+if [ "$a4_fail" -eq 0 ]; then echo "ASSERTION 4: PASS"; else echo "ASSERTION 4: FAIL"; fail=1; fi
 
 # 5 ----------------------------------------------------------------- storage --
 head2 "ASSERTION 5  receipts bucket exists with public = false"

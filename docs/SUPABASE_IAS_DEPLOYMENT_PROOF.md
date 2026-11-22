@@ -96,7 +96,7 @@ connection-string shape and redacts it before exiting.
 
 ```text
 Momompurin - Supabase IAS deployment
-started 2026-11-22T12:35:14Z (UTC)
+started 2026-11-22T12:41:09Z (UTC)
 ------------------------------------------------------------------------
 STEP 1  existing state, before any change
 ------------------------------------------------------------------------
@@ -191,15 +191,15 @@ ASSERTION 2  SET LOCAL ROLE anon against customer/invoice tables and the custome
 ------------------------------------------------------------------------
 
 SQL> begin; set local role anon; select count(*) from public.customer; commit;
+ERROR:  permission denied for table customer
 BEGIN
 SET
-ERROR:  permission denied for table customer
   -> denied
 
 SQL> begin; set local role anon; select count(*) from public.invoice; commit;
-ERROR:  permission denied for table invoice
 BEGIN
 SET
+ERROR:  permission denied for table invoice
   -> denied
 
 SQL> begin; set local role anon; select count(*) from public.order; commit;
@@ -219,6 +219,7 @@ BEGIN
 SET
 ERROR:  permission denied for view customer_invoice_view
   -> denied
+ASSERTION 2: PASS
 
 ------------------------------------------------------------------------
 ASSERTION 3  customer_invoice_view exposes no internal cost/margin/review column
@@ -275,11 +276,13 @@ CONTEXT:  PL/pgSQL function enforce_append_only() line 5 at RAISE
 
 SQL> select has_table_privilege('authenticated','public.activity_log','UPDATE') as can_update,
           has_table_privilege('authenticated','public.activity_log','DELETE') as can_delete;
-f|f|f
+false|false|false
+  (columns: authenticated_can_update | authenticated_can_delete | anon_can_update)
 
 SQL> triggers on the ledgers
 activity_log|activity_log_append_only|t
 stock_adjustment|stock_adjustment_append_only|t
+ASSERTION 4: PASS
 
 ------------------------------------------------------------------------
 ASSERTION 5  receipts bucket exists with public = false
@@ -302,7 +305,7 @@ ALL 5 ASSERTIONS PASSED
 ------------------------------------------------------------------------
 DEPLOYMENT VERIFIED - all 5 assertions passed
 ------------------------------------------------------------------------
-transcript: /tmp/deploy_full.txt
+transcript: /tmp/final_transcript.txt
 ```
 
 ## Assertion results
@@ -328,16 +331,52 @@ No Kotlin, Gradle or APK file was touched. `v2.3.0` remains frozen at `279/279`.
 
 ## Reproducing
 
+### Local container — assertions 1-4
+
+A bare Postgres has no `storage` schema, so `0005` skips the bucket with a NOTICE
+and **assertion 5 fails by design**. That is correct behaviour, not a defect: the
+migration must not invent a schema the platform owns. Assertions 1-4 are fully
+exercised this way.
+
 ```bash
-# local container, all five assertions
 docker run -d --name momo_ias_pg -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=momo postgres:16
 for f in supabase/migrations/000*.sql; do
   docker exec -i momo_ias_pg psql -U postgres -d momo -v ON_ERROR_STOP=1 -q < "$f"
 done
 docker exec -i momo_ias_pg psql -U postgres -d momo -q < supabase/seed/seed_synthetic_demo.sql
-supabase/verify/run_ias_assertions.sh
+PGCONTAINER=momo_ias_pg supabase/verify/run_ias_assertions.sh
+```
 
-# hosted project, once provisioned: export SUPABASE_DB_URL from the project's
-# dashboard first, then run the deploy script. The string is never written here.
+### Local container — all five, with the storage surface provisioned
+
+To exercise assertion 5 locally, create the two tables Supabase provides first.
+Then `0005` finds `to_regclass('storage.buckets')` non-null and creates the bucket
+for real. This is how the transcript below was produced.
+
+```bash
+docker exec -i momo_ias_pg psql -U postgres -d momo -q -v ON_ERROR_STOP=1 <<'SQL'
+create schema storage;
+create table storage.buckets (id text primary key, name text not null,
+                              public boolean not null default false,
+                              created_at timestamptz not null default now());
+create table storage.objects (id uuid primary key default gen_random_uuid(),
+                              bucket_id text not null references storage.buckets(id),
+                              name text not null,
+                              created_at timestamptz not null default now());
+alter table storage.objects enable row level security;
+alter table storage.objects force row level security;
+SQL
+docker exec -i momo_ias_pg psql -U postgres -d momo -v ON_ERROR_STOP=1 \
+  -q < supabase/migrations/0005_append_only_audit_and_receipts.sql
+PGCONTAINER=momo_ias_pg supabase/verify/run_ias_assertions.sh
+```
+
+### Hosted project, once provisioned
+
+Export the project's connection string from the dashboard into `SUPABASE_DB_URL`,
+then run the deploy script. It inspects, applies, optionally seeds, and runs all
+five assertions. The string is never written to this document.
+
+```bash
 SEED=1 supabase/verify/deploy_to_supabase.sh
 ```
