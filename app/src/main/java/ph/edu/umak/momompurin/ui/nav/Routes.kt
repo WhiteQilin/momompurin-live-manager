@@ -19,6 +19,8 @@ import ph.edu.umak.momompurin.R
 object Routes {
     // ---------------------------------------------------------------- auth -----
     const val SIGN_IN = "sign-in"
+    /** UAT fix (item 13): the customer-only password reset entry point. */
+    const val FORGOT_PASSWORD = "forgot-password"
     const val REGISTER = "register"
 
     // --------------------------------------------------------------- owner -----

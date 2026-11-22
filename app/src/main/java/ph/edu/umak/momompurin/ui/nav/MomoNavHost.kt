@@ -51,7 +51,8 @@ import ph.edu.umak.momompurin.ui.screens.ShippingScreen
 import ph.edu.umak.momompurin.ui.screens.ShopScreen
 import ph.edu.umak.momompurin.ui.screens.CustomerCancelledScreen
 import ph.edu.umak.momompurin.ui.screens.CustomerHeldScreen
-import ph.edu.umak.momompurin.ui.screens.EditProfileScreen
+import ph.edu.umak.momompurin.ui.screens.EditAccountScreen
+import ph.edu.umak.momompurin.ui.screens.ForgotPasswordScreen
 import ph.edu.umak.momompurin.ui.screens.InvoiceViewScreen
 import ph.edu.umak.momompurin.ui.screens.SignInScreen
 import ph.edu.umak.momompurin.ui.screens.StockAdjustScreen
@@ -125,7 +126,9 @@ fun MomoNavHost(
     // Computed here, above the layout, because TWO things depend on it: the bar
     // itself, and the snackbar host - which must clear the bar when one is
     // showing and the gesture inset when none is (v2.3 HCI audit F-17).
-    val onAuthScreen = effectiveRoute == Routes.SIGN_IN || effectiveRoute == Routes.REGISTER
+    val onAuthScreen = effectiveRoute == Routes.SIGN_IN ||
+        effectiveRoute == Routes.REGISTER ||
+        effectiveRoute == Routes.FORGOT_PASSWORD
     val activeOwnerTab = if (!onAuthScreen && session?.role == Role.OWNER) {
         OwnerTab.forRoute(effectiveRoute)
     } else {
@@ -238,6 +241,20 @@ fun MomoNavHost(
                             }
                         },
                         onCreateAccount = { go(Routes.REGISTER) },
+                        onForgotPassword = { go(Routes.FORGOT_PASSWORD) },
+                    )
+                }
+                // UAT fix (item 13): customer-only password recovery.
+                composable(Routes.FORGOT_PASSWORD) {
+                    ForgotPasswordScreen(
+                        store = store,
+                        onBack = { navController.popBackStack() },
+                        onReset = {
+                            navController.navigate(Routes.SIGN_IN) {
+                                popUpTo(Routes.SIGN_IN) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        },
                     )
                 }
                 composable(Routes.REGISTER) {
@@ -556,13 +573,15 @@ fun MomoNavHost(
                     AccountScreen(
                         store = store,
                         onEditProfile = { go(Routes.MY_EDIT_PROFILE) },
-                        onChangePassword = { go(Routes.MY_CHANGE_PASSWORD) },
                         onSignOut = { signOut() },
                         onOpenOrders = { go(Routes.MY_ORDERS) },
                     )
                 }
+                // UAT fix (item 12): Change password now lives INSIDE Edit account,
+                // so the separate route is kept only as a redirect for any deep
+                // link or saved back-stack entry from an older build.
                 composable(Routes.MY_EDIT_PROFILE) {
-                    EditProfileScreen(store = store, onBack = { navController.popBackStack() })
+                    EditAccountScreen(store = store, onBack = { navController.popBackStack() })
                 }
                 composable(Routes.MY_CHANGE_PASSWORD) {
                     ChangePasswordScreen(store = store, onBack = { navController.popBackStack() })

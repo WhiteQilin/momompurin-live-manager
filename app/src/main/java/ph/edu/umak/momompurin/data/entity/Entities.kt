@@ -158,6 +158,19 @@ enum class OrderStage(val label: String) {
     ORDER_PLACED("Order Placed"),
     WAITING_PAYMENT("Waiting for Payment"),
     TO_PACK("To Pack"),
+
+    /**
+     * UAT fix (Krenshin's report, item 5): the stage a PACKED order moves into.
+     *
+     * Before this existed, confirming `Mark as Packed` left the order sitting in
+     * `To Pack` with the `Pack order` button still on screen - so the owner could
+     * not tell a packed parcel from an unpacked one, and the only way forward was
+     * to open the shipping screen directly. Packing and dispatching are separate
+     * acts (the parcel is boxed; the courier is chosen later), which is why this
+     * is its own stage rather than jumping straight to [SHIPPED].
+     */
+    TO_SHIP("To Ship"),
+
     SHIPPED("Shipped"),
     COMPLETED("Completed"),
     CANCELLED("Cancelled"),
@@ -260,6 +273,17 @@ data class Order(
 
     /** A-05 c6: once Paid, editing and customer cancellation are locked. */
     val isPaid: Boolean get() = paymentStatus == PaymentStatus.PAID
+
+    /**
+     * UAT fix (item 5): whether the shipping screen has anything to show yet.
+     *
+     * A packed parcel's courier route and waybill are chosen on the shipping
+     * screen; until either is recorded there is nothing to display to the
+     * customer and nothing to hand the courier, so the order detail offers the
+     * entry point rather than a form over blank fields.
+     */
+    val hasShippingDetails: Boolean
+        get() = courier.isNotBlank() || trackingNo.isNotBlank()
 
     /** A-06 c6: held orders are the ones bought with Hold For Combined Shipping. */
     val isHeld: Boolean get() = fulfillment == Fulfillment.HOLD_FOR_COMBINED

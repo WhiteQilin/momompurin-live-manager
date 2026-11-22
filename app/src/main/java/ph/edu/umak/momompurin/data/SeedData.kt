@@ -48,6 +48,7 @@ import java.util.Calendar
  * | ORD-1045 | Mika Tan    | P400.00 | A-04 overdue: cancel -> restore, stock   |
  * | ORD-1043 | Jessa Reyes | P90.00  | A-04 "Packed orders cannot be cancelled."|
  * | ORD-1042 | Pia Santos  | P880.00 | A-05 partial payment, P600 of P880       |
+ * | ORD-1052 | Bea Cruz    | P90.00  | plain PAID + To Pack row (UAT fix)       |
  * | ORD-1040 | Jessa Reyes | P570.00 | A-07 packing + dispatch stock arithmetic  |
  * | ORD-1039 | Bea Cruz    | P600.00 | A-06 held 3 days, electronic: NO advisory|
  * | ORD-1038 | Anne Garcia | P620.00 | A-06 held 7 days, electronic: advisory   |
@@ -225,10 +226,17 @@ object SeedData {
      *   Pending orders     = stage Order Placed            -> 4 (1051, 1050, 1049, 1048)
      *   Unpaid or overdue  = balance > 0 past Incoming     -> 3 (1042, 1045, 1043)
      *   Held orders        = Hold For Combined, Paid       -> 4 (1039, 1038, 1037, 1036)
-     *   To pack            = stage To Pack, not held       -> 3 (1042, 1043, 1040)
+     *   To pack            = stage To Pack, not held       -> 2 (1052, 1040)
      *
-     * ORD-1042 counts in two tiles on purpose ("To pack" and "Unpaid or overdue")
-     * because packing and payment are independent tracks (A-04 c4).
+     * UAT fix (item 2): `To pack` used to list 1042 and 1043 as well, both
+     * `Partially Paid`. A-07 only packs a fully-paid order, so those two were
+     * offering packing work the packer must refuse - they now sit in
+     * `Waiting for Payment` where their balances belong. ORD-1052 was added so the
+     * tab still has two genuinely packable rows rather than one.
+     *
+     * "Unpaid or overdue" still counts all three, because it is the money tile and
+     * a balance is exactly what it reports (A-04 c4: payment and fulfillment are
+     * independent tracks).
      */
     fun orders(): List<Order> = listOf(
         // ---- Incoming queue: fresh Order Placed orders (A-04 c3) -------------
@@ -304,9 +312,16 @@ object SeedData {
         // The cancel guard checks Paid before Packed, so this row is
         // PARTIALLY_PAID on purpose: it is what makes "Packed orders cannot be
         // cancelled." reachable inside A-04 without first walking A-07.
+        //
+        // UAT fix (item 2): the stage is WAITING_PAYMENT, not To Pack. A-07 now
+        // refuses to pack anything that is not fully paid, so a `Partially Paid`
+        // row sitting in the To Pack queue was offering the owner packing work
+        // that the packer would then refuse. The parcel is still PACKED and still
+        // unpaid - which is exactly the contradictory state the cancel guard is
+        // there to describe, and the guard reports it before any stage is read.
         Order(
             orderId = "ORD-1043", customerEmail = "jessa.reyes@example.com",
-            placedAt = daysAgo(3, 16, 20), stage = OrderStage.TO_PACK,
+            placedAt = daysAgo(3, 16, 20), stage = OrderStage.WAITING_PAYMENT,
             paymentStatus = PaymentStatus.PARTIALLY_PAID,
             packingStatus = PackingStatus.PACKED,
             shippingStatus = ShippingStatus.NOT_SHIPPED,
@@ -324,9 +339,14 @@ object SeedData {
         // ---- ORD-1042: the canonical order (A-02 c5, A-05 c1) ----------------
         // MCKP 160.00 + SCWH 600.00 + freebie 0.00 = 760.00 subtotal
         // + 120.00 shipping = 880.00 ; paid 600.00 ; balance 280.00.
+        //
+        // UAT fix (item 2): stage WAITING_PAYMENT, not To Pack. The order still
+        // owes P280.00, and A-07 only packs a fully-paid order - so the To Pack
+        // tab must not offer it. It remains the canonical A-05 partial-payment
+        // subject, which is the role the workbook gives it.
         Order(
             orderId = "ORD-1042", customerEmail = "pia.santos@example.com",
-            placedAt = daysAgo(3, 21, 15), stage = OrderStage.TO_PACK,
+            placedAt = daysAgo(3, 21, 15), stage = OrderStage.WAITING_PAYMENT,
             paymentStatus = PaymentStatus.PARTIALLY_PAID,
             packingStatus = PackingStatus.NOT_PACKED,
             shippingStatus = ShippingStatus.NOT_SHIPPED,
@@ -339,6 +359,34 @@ object SeedData {
             recipientName = "Pia Santos", mobile = "0917 555 0142",
             province = "Metro Manila", city = "Makati", barangay = "Poblacion",
             addressLine = "12A Sampaguita St",
+        ),
+
+        // ---- ORD-1052: the second healthy To Pack row (UAT fix, item 2) ------
+        // A-07 now requires a fully PAID order before packing, so the To Pack
+        // queue needs at least two rows that actually satisfy that rule or the
+        // tab reads as broken on a fresh install. ORD-1040 is the three-item
+        // packing walk; this is the plain one-item row beside it.
+        //
+        // It is a NEW order rather than a promoted existing one on purpose: the
+        // Incoming queue is pinned at four by A-02, and moving 1048 or 1050 into
+        // packing would have shrunk it to three.
+        //
+        // W1 is the SKU here because its on-hand/reserved split is derived and
+        // unpinned, so adding a row moves `reserved` and `physical` together and
+        // leaves Available - the figure A-13's badges read - exactly where it was.
+        Order(
+            orderId = "ORD-1052", customerEmail = "bea.cruz@example.com",
+            placedAt = daysAgo(2, 15, 10), stage = OrderStage.TO_PACK,
+            paymentStatus = PaymentStatus.PAID,
+            packingStatus = PackingStatus.NOT_PACKED,
+            shippingStatus = ShippingStatus.NOT_SHIPPED,
+            itemSubtotal = 9000,
+            amountPaid = 9000,
+            invoiceNo = "MP-1052",
+            invoicedAt = daysAgo(2, 16, 0),
+            recipientName = "Bea Cruz", mobile = "0918 555 0177",
+            province = "Metro Manila", city = "Pasig", barangay = "San Antonio",
+            addressLine = "9 Rosal St",
         ),
 
         // ---- ORD-1040: the packing checklist's 3-item order (A-07 c1) --------
@@ -473,6 +521,9 @@ object SeedData {
         OrderLine("L-1045-1", "ORD-1045", "CHW", "Chiikawa Wipes", qty = 8, unitPrice = 3500),
         OrderLine("L-1045-2", "ORD-1045", "HKEYE", "Hello Kitty Eye Mask", qty = 4, unitPrice = 3000),
 
+        // ORD-1052: W1 x2 = P90.00 (fully paid; the plain To Pack row)
+        OrderLine("L-1052-1", "ORD-1052", "W1", "Hangyodon Wipes", qty = 2, unitPrice = 4500),
+
         // ORD-1043: W1 x2 = P90.00 (paid P40.00, balance P50.00)
         OrderLine("L-1043-1", "ORD-1043", "W1", "Hangyodon Wipes", qty = 2, unitPrice = 4500),
 
@@ -559,7 +610,7 @@ object SeedData {
      *   MPBOW-LV 5 on hand /  2 reserved /  3 available
      *   MMBBS    2 on hand /  1 reserved /  1 available   (A-14 c5 last unit)
      *   P5T      0 on hand /  0 reserved /  0 available   (A-13 c5 Out of Stock)
-     *   W1      14 on hand /  6 reserved /  8 available
+     *   W1      16 on hand /  8 reserved /  8 available
      *   MCKP     7 on hand /  2 reserved /  5 available
      *   STKFR    1 on hand /  1 reserved /  0 available   (hidden freebie)
      *
@@ -731,8 +782,9 @@ object SeedData {
         Payment("PMT-1042-1", "ORD-1042", 60000, "GCash", daysAgo(2, 11, 1)),
         // A-05 c2: the partial payment on the packed order (P40 of P90).
         Payment("PMT-1043-1", "ORD-1043", 4000, "Maya", daysAgo(3, 10, 5)),
-        // ORD-1040, the held orders and the dispatched order are settled in full.
+        // ORD-1040, ORD-1052, the held orders and the dispatched order are paid in full.
         Payment("PMT-1040-1", "ORD-1040", 57000, "Bank Transfer", daysAgo(3, 9, 20)),
+        Payment("PMT-1052-1", "ORD-1052", 9000, "GCash", daysAgo(2, 16, 5)),
         Payment("PMT-1039-1", "ORD-1039", 60000, "GCash", daysAgo(4, 9, 50)),
         Payment("PMT-1038-1", "ORD-1038", 62000, "GCash", daysAgo(8, 9, 55)),
         Payment("PMT-1037-1", "ORD-1037", 36000, "Maya", daysAgo(9, 9, 45)),
@@ -745,6 +797,7 @@ object SeedData {
         Invoice("MP-1043", "ORD-1043", daysAgo(3, 9, 10), 9000),
         Invoice("MP-1042", "ORD-1042", daysAgo(2, 11, 2), 88000),
         Invoice("MP-1040", "ORD-1040", daysAgo(3, 9, 40), 57000),
+        Invoice("MP-1052", "ORD-1052", daysAgo(2, 16, 0), 9000),
         Invoice("MP-1039", "ORD-1039", daysAgo(4, 10, 5), 60000),
         Invoice("MP-1038", "ORD-1038", daysAgo(8, 10, 5), 62000),
         Invoice("MP-1037", "ORD-1037", daysAgo(9, 10, 40), 36000),
@@ -869,6 +922,14 @@ object SeedData {
 
     /** A-07's three-item packing order. */
     const val PACKING_ORDER = "ORD-1040"
+
+    /**
+     * UAT fix (item 2): the plain fully-paid To Pack row beside [PACKING_ORDER].
+     *
+     * Two rows are needed because A-07 now refuses to pack anything not fully
+     * paid, and a queue of one looks like a bug to whoever opens the tab.
+     */
+    const val SECOND_PACKABLE_ORDER = "ORD-1052"
 
     /** The complete seeded dataset. */
     fun build(): MomoData = MomoData(

@@ -485,6 +485,44 @@ class MomoStore(seed: MomoData = SeedData.build()) {
     fun setReviewFlag(email: String, flag: String?) =
         update { OrderOps.setReviewFlag(it, email, flag) }
 
+    /**
+     * UAT fix (item 13): reset a CUSTOMER's password from email + mobile.
+     *
+     * Deliberately NOT gated on [ownerReadOnly]: this runs from the signed-OUT
+     * Sign In screen, where there is no session and therefore no owner to be
+     * read-only. The security control here is [AccountOps.resetCustomerPassword]'s
+     * identity check and its owner refusal, not the offline switch.
+     *
+     * Returns the failure message, or null on success - the same shape as the
+     * other account writes, so the screen shows one string in one place.
+     */
+    fun resetCustomerPassword(
+        email: String,
+        mobile: String,
+        newPassword: String,
+        confirm: String,
+    ): String? {
+        return when (
+            val result = AccountOps.resetCustomerPassword(
+                _data.value, email, mobile, newPassword, confirm,
+            )
+        ) {
+            is AccountOps.ResetResult.Failure -> result.message
+            is AccountOps.ResetResult.Success -> {
+                val updated = result.account
+                update { data ->
+                    data.copy(
+                        accounts = data.accounts.map {
+                            if (it.email.equals(updated.email, ignoreCase = true)) updated else it
+                        },
+                    )
+                }
+                null
+            }
+        }
+    }
+
+
     // ----------------------------------------------------------------- cart -----
 
     /** A-14 c1: adding to the cart changes NO product. */
@@ -747,6 +785,24 @@ class MomoStore(seed: MomoData = SeedData.build()) {
         return commit(
             OrderOps.updateShipping(_data.value, orderId, courier, trackingNo, status, now),
         )
+    }
+
+    /**
+     * UAT fix (item 5): the CUSTOMER confirms the parcel arrived.
+     *
+     * Gated on [ownerReadOnly] like every other write, which for a customer
+     * session is always false - the owner's test switch must never block a
+     * customer's own confirmation, the same rule [placeOrder] follows.
+     */
+    fun markOrderReceived(
+        orderId: String,
+        by: CancelledBy = CancelledBy.CUSTOMER,
+        now: Long = System.currentTimeMillis(),
+    ): OrderOps.ReceiveResult {
+        if (ownerReadOnly) {
+            return OrderOps.ReceiveResult.Refused(OFFLINE_READ_ONLY, _data.value)
+        }
+        return commit(OrderOps.markReceived(_data.value, orderId, by, now))
     }
 
     /** A-04 c5: edit an unsettled order. */

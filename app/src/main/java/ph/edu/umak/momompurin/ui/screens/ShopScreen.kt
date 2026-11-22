@@ -164,12 +164,11 @@ fun ShopScreen(
             item {
                 // A-13 c2: search by product name or product code - now through the
                 // trigram fallback, so a misspelled name still finds its row.
-                MomoField(
+                // UAT fix (item 11): the same magnifier field the owner tabs use.
+                ph.edu.umak.momompurin.ui.components.MomoSearchField(
                     value = query,
                     onValueChange = { query = it },
                     label = "Search products",
-                    labelOutside = true,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 

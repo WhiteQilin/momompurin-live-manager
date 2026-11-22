@@ -117,12 +117,12 @@ fun StockScreen(
         // F-02). Do not reintroduce a per-screen banner here.
 
         Column(Modifier.padding(start = MomoSpace.Lg, end = MomoSpace.Lg, top = MomoSpace.Lg)) {
-            MomoField(
+            // UAT fix (item 11): the magnifier-led 48-52dp search field, shared
+            // with Shop, Orders and Customers so the four tabs match.
+            ph.edu.umak.momompurin.ui.components.MomoSearchField(
                 value = query,
                 onValueChange = { query = it },
                 label = "Search product or code",
-                labelOutside = true,
-                modifier = Modifier.fillMaxWidth(),
             )
         }
 
@@ -762,8 +762,15 @@ fun ProductFormScreen(
                         unitCost = preview?.unitCost ?: 0L,
                     )
                     store.saveProduct(saved, changedFields = "product details")
-                    notice = CatalogueOps.PRODUCT_SAVED
+                    // UAT fix (item 7): the confirmation goes through the floating
+                    // snackbar host, not a line of text above the button. On this
+                    // form the button is at the bottom of a scrolling page, so the
+                    // inline notice appeared BELOW the fold on every save - the
+                    // tester tapped Save, saw nothing, and tapped again.
                     isError = false
+                    ph.edu.umak.momompurin.ui.components.MomoMessages.show(
+                        CatalogueOps.PRODUCT_SAVED,
+                    )
                 },
                 modifier = Modifier.fillMaxWidth(),
             )

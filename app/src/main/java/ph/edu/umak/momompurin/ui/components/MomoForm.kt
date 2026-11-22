@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -177,6 +179,82 @@ fun MomoField(
             )
         }
     }
+}
+
+/**
+ * The one search field every list screen uses (UAT fix, item 11).
+ *
+ * A search box that looks exactly like a data-entry field makes the user wonder
+ * whether they are meant to type a value into it, so the magnifier is the
+ * affordance that says "this narrows the list" before anything is typed. The
+ * height is pinned to the 48-52dp band the report asked for: Material's default
+ * OutlinedTextField is 56dp, which on a 412dp-wide screen pushes the first list
+ * row below the fold on all four tabs.
+ *
+ * The label sits INSIDE the box as the placeholder rather than above it. On a
+ * list screen the label's only job is to say what can be typed, and printing it
+ * twice (caption above + placeholder inside) was the duplication the old
+ * `labelOutside` comment already complained about.
+ */
+@Composable
+fun MomoSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = {
+            Text(label, style = MomoType.BodySmall, color = MomoColors.TextSecondary)
+        },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = "Search",
+                tint = MomoColors.TextSecondary,
+                modifier = Modifier.size(20.dp),
+            )
+        },
+        trailingIcon = if (value.isEmpty()) {
+            null
+        } else {
+            {
+                // Clearing a search is the action a user reaches for next, and
+                // without it they must select-and-delete by hand.
+                Box(
+                    Modifier
+                        .heightIn(min = MomoDimens.TouchTarget)
+                        .padding(horizontal = MomoSpace.Xs)
+                        .clickable { onValueChange("") },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Clear search",
+                        tint = MomoColors.TextSecondary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(MomoRadius.Input),
+        textStyle = MomoType.BodyDefault,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MomoColors.BrandSecondary1Shade1,
+            unfocusedBorderColor = MomoColors.BorderPrimary,
+            focusedContainerColor = MomoColors.SurfaceCard,
+            unfocusedContainerColor = MomoColors.SurfaceCard,
+        ),
+        // The 48-52dp band: Material sizes the DECORATION box from the text
+        // style, so pinning the container height here keeps the field slim
+        // without shrinking its touch target below the accessible minimum.
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp, max = 52.dp),
+    )
 }
 
 /** One option in a [MomoPicker]. [enabled] implements D-05 c5's greyed-out values. */

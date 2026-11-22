@@ -185,7 +185,10 @@ class ComplianceAuditTest {
             "VariantsScreen", "CartScreen", "CheckoutScreen",
             "CustomerOrdersScreen", "CustomerOrderDetailScreen",
             "CustomerHeldScreen", "CustomerCancelledScreen", "AccountScreen",
-            "EditProfileScreen", "ChangePasswordScreen", "InvoiceViewScreen",
+            // UAT fix (item 12): Edit profile became Edit account, with Change
+            // password embedded in it. UAT fix (item 13) added the reset screen.
+            "EditAccountScreen", "ChangePasswordScreen", "ForgotPasswordScreen",
+            "InvoiceViewScreen",
         ).forEach { name ->
             assertTrue("$name must be declared in ui/screens", declared.contains(name))
         }

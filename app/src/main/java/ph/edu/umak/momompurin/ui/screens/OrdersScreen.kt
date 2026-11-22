@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,6 +40,7 @@ import ph.edu.umak.momompurin.data.OrderOps
 import ph.edu.umak.momompurin.data.entity.CancelledBy
 import ph.edu.umak.momompurin.data.entity.Order
 import ph.edu.umak.momompurin.data.entity.OrderStage
+import ph.edu.umak.momompurin.data.entity.ShippingStatus
 import ph.edu.umak.momompurin.ui.components.KeyValueRow
 import ph.edu.umak.momompurin.ui.components.MiniAction
 import ph.edu.umak.momompurin.ui.components.MomoBadges
@@ -47,6 +49,7 @@ import ph.edu.umak.momompurin.ui.components.MomoCard
 import ph.edu.umak.momompurin.ui.components.MomoConfirmDialog
 import ph.edu.umak.momompurin.ui.components.MomoDivider
 import ph.edu.umak.momompurin.ui.components.MomoField
+import ph.edu.umak.momompurin.ui.components.MomoSearchField
 import ph.edu.umak.momompurin.ui.components.MomoTopBar
 import ph.edu.umak.momompurin.ui.components.StatusBadge
 import ph.edu.umak.momompurin.ui.theme.MomoColors
@@ -74,15 +77,21 @@ fun OrdersScreen(
     store: MomoStore,
     onOpenOrder: (String) -> Unit,
     initialFilter: DashboardFilter? = null,
+    /** UAT fix (item 1): the Held chip's banner links to Hold and combine orders. */
+    onOpenHeld: () -> Unit = {},
 ) {
     val data by store.data.collectAsState()
     var stage by remember { mutableStateOf(initialFilter.toStage()) }
     // The two tiles that are NOT a single stage - "Unpaid or overdue" spans
     // several - need their own predicate alongside the stage chip.
     var special by remember { mutableStateOf(initialFilter) }
+    // UAT fix (item 1): the Held chip is a PREDICATE, not a stage. A held order
+    // still carries a lifecycle stage (To Pack, usually), so folding it into
+    // [stage] would make it invisible in whichever stage tab it also belongs to.
+    var heldOnly by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
 
-    val results = remember(data.orders, data.products, stage, special, query) {
+    val results = remember(data.orders, data.products, stage, special, heldOnly, query) {
         data.searchOrders(query).filter { order ->
             when {
                 // A-02 c2: "Unpaid or overdue" is the Dashboard predicate, not a
@@ -91,6 +100,11 @@ fun OrdersScreen(
                     order.balance > 0 &&
                         order.stage != OrderStage.ORDER_PLACED &&
                         order.stage != OrderStage.CANCELLED
+                // UAT fix (item 1): paid held orders that are still waiting to be
+                // combined. This is the SAME predicate [MomoData.heldOrders] uses,
+                // so the chip's count and the Hold screen's list cannot disagree.
+                heldOnly -> order.isHeld && order.isPaid &&
+                    order.stage != OrderStage.CANCELLED
                 // The "To Pack" tab excludes held orders so it agrees with A-02's
                 // tile: a held order waits for A-06's Combine, not for the packing
                 // table.
@@ -105,6 +119,7 @@ fun OrdersScreen(
     fun selectStage(next: OrderStage?) {
         stage = next
         special = null
+        heldOnly = false
     }
 
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
@@ -120,18 +135,16 @@ fun OrdersScreen(
                 top = MomoSpace.TopContentGap,
             ),
         ) {
-            MomoField(
+            MomoSearchField(
                 value = query,
                 onValueChange = { query = it },
                 label = "Search order number or customer",
-                labelOutside = true,
-                modifier = Modifier.fillMaxWidth(),
             )
         }
 
-        // A-04 c3: All, Incoming, Waiting for Payment, To Pack, Shipped, Completed,
-        // Cancelled. "Incoming" is Order Placed, which is the name the criterion
-        // gives that queue.
+        // A-04 c3: All, Incoming, Waiting for Payment, Held, To Pack, To Ship,
+        // Shipped, Completed, Cancelled. "Incoming" is Order Placed, which is the
+        // name the criterion gives that queue.
         Row(
             Modifier
                 .fillMaxWidth()
@@ -141,7 +154,7 @@ fun OrdersScreen(
         ) {
             StageChip(
                 label = "All",
-                selected = stage == null && special == null,
+                selected = stage == null && special == null && !heldOnly,
                 onClick = { selectStage(null) },
             )
             StageChip(
@@ -149,9 +162,23 @@ fun OrdersScreen(
                 selected = stage == OrderStage.ORDER_PLACED,
                 onClick = { selectStage(OrderStage.ORDER_PLACED) },
             )
+            StageChip(
+                label = OrderStage.WAITING_PAYMENT.label,
+                selected = stage == OrderStage.WAITING_PAYMENT,
+                onClick = { selectStage(OrderStage.WAITING_PAYMENT) },
+            )
+            // UAT fix (item 1): Held sits between Waiting for Payment and To Pack,
+            // which is where it belongs in the owner's actual day - after the money
+            // arrives and before the parcel is boxed. It is a predicate rather than
+            // a stage, so selecting it leaves `stage` null and `special` null.
+            StageChip(
+                label = "Held",
+                selected = heldOnly,
+                onClick = { selectStage(null); heldOnly = true },
+            )
             listOf(
-                OrderStage.WAITING_PAYMENT,
                 OrderStage.TO_PACK,
+                OrderStage.TO_SHIP,
                 OrderStage.SHIPPED,
                 OrderStage.COMPLETED,
                 OrderStage.CANCELLED,
@@ -183,6 +210,38 @@ fun OrdersScreen(
                         color = MomoColors.TextSecondary,
                         modifier = Modifier.padding(vertical = MomoSpace.Xl),
                     )
+                }
+            }
+
+            // UAT fix (item 1): the Held chip's companion. Filtering to held orders
+            // shows the owner the queue, but the ACTION for that queue lives on
+            // another screen - so the banner carries the owner there instead of
+            // leaving them to find More > Hold and combine orders themselves.
+            if (heldOnly && results.isNotEmpty()) {
+                item {
+                    MomoCard(Modifier.clickable(onClick = onOpenHeld)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Hold and combine orders",
+                                    style = MomoType.TitleSmall,
+                                    color = MomoColors.BrandDeep,
+                                )
+                                Text(
+                                    "${results.size} paid " +
+                                        (if (results.size == 1) "order" else "orders") +
+                                        " waiting to be combined.",
+                                    style = MomoType.CaptionSmall,
+                                    color = MomoColors.TextSecondary,
+                                )
+                            }
+                            Text(
+                                "\u203A",
+                                style = MomoType.TitleSmall,
+                                color = MomoColors.BrandDeep,
+                            )
+                        }
+                    }
                 }
             }
             items(results, key = { it.orderId }) { order ->
@@ -323,6 +382,20 @@ fun OrderDetailScreen(
     var notice by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
 
+    // UAT fix (item 6): order edits are BUFFERED here and written only on an
+    // explicit Save changes.
+    //
+    // The report's complaint was that edits were committed on Back press, so
+    // leaving the screen silently rewrote an order. There is no autosave path at
+    // all now: `draftQty` is UI-only state, the store is never touched until
+    // [saveEdits] runs, and leaving the screen (or tapping Cancel) simply drops
+    // the map. Because the draft lives in `remember`, walking away mid-edit
+    // cannot write anything - discarding is the absence of a write, not an undo.
+    var editing by remember { mutableStateOf(false) }
+    var draftQty by remember(orderId, order?.itemSubtotal) {
+        mutableStateOf(data.linesFor(orderId).associate { it.sku to it.qty })
+    }
+
     if (order == null) {
         Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
             MomoTopBar(title = orderId, onBack = onBack)
@@ -339,6 +412,31 @@ fun OrderDetailScreen(
         ph.edu.umak.momompurin.data.entity.PackingStatus.PACKED &&
         order.stage != OrderStage.CANCELLED && !offline
 
+    // A-04 c5: quantities may only change while the order is unsettled, which is
+    // the same window `OrderOps.editQuantities` enforces. The screen's flag is an
+    // early signal; the ops layer's check is the gate.
+    val canEditQuantities = order.stage == OrderStage.ORDER_PLACED && !locked && !offline
+    val lines = data.linesFor(orderId)
+    // "Dirty" is computed from the draft, never tracked by hand, so a field typed
+    // back to its original value correctly reads as no change.
+    val hasUnsavedEdits = editing && lines.any { draftQty[it.sku] != it.qty }
+
+    /** UAT fix (item 6): the ONE place a buffered edit reaches the store. */
+    fun saveEdits() {
+        val result = store.editOrderQuantities(orderId, draftQty)
+        when (result) {
+            is OrderOps.EditResult.Applied -> {
+                notice = "Order changes saved."
+                isError = false
+                editing = false
+            }
+            is OrderOps.EditResult.Refused -> {
+                notice = result.message
+                isError = true
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
         MomoTopBar(
             title = order.orderId,
@@ -352,6 +450,37 @@ fun OrderDetailScreen(
                 order.isPaid -> "Paid \u00B7 locked"
                 order.stage == OrderStage.CANCELLED -> "Cancelled"
                 else -> order.stage.label
+            },
+            actions = {
+                // UAT fix (item 6): the explicit Save changes lives in the header,
+                // where it stays reachable while the items list scrolls - the whole
+                // point is that the owner can see the control that commits their
+                // work at any scroll position.
+                if (editing) {
+                    Box(
+                        Modifier
+                            .heightIn(min = MomoDimens.TouchTarget)
+                            .background(
+                                MomoColors.ButtonPrimaryFill,
+                                RoundedCornerShape(MomoRadius.Input),
+                            )
+                            .clickable(enabled = hasUnsavedEdits) { saveEdits() }
+                            .padding(horizontal = MomoSpace.Md),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Save changes",
+                            style = MomoType.LabelChip,
+                            color = if (hasUnsavedEdits) {
+                                MomoColors.BrandDarkest
+                            } else {
+                                MomoColors.ButtonDisabledContent
+                            },
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
             },
         )
 
@@ -509,7 +638,7 @@ fun OrderDetailScreen(
             }
 
             // A-07: the packing and shipping entries.
-            if (order.stage == OrderStage.TO_PACK || order.stage == OrderStage.SHIPPED) {
+            if (order.stage == OrderStage.TO_PACK) {
                 MomoCard {
                     Text("Packing and shipping",
                         style = MomoType.TitleSmall, color = MomoColors.TextPrimary)
@@ -527,12 +656,55 @@ fun OrderDetailScreen(
                         )
                     }
                 }
+            } else if (order.stage == OrderStage.TO_SHIP || order.stage == OrderStage.SHIPPED) {
+                // UAT fix (item 5): a packed order has nothing left to pack, so the
+                // `Pack order` control is GONE - not merely disabled - and the
+                // shipping details are shown here directly instead of behind a tap.
+                //
+                // The report's complaint was that after confirming `Mark as Packed`
+                // the screen still offered `Pack order`, which read as though the
+                // confirmation had not taken. Hiding it is the honest signal: the
+                // parcel is boxed, and the only open work is the courier.
+                ShippingDetailsCard(
+                    store = store,
+                    order = order,
+                    offline = offline,
+                )
             }
 
             MomoCard {
-                Text("Items", style = MomoType.TitleSmall, color = MomoColors.TextPrimary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Items",
+                        style = MomoType.TitleSmall,
+                        color = MomoColors.TextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // A-04 c5 / UAT fix (item 6): Edit opens a DRAFT. Nothing is
+                    // written until Save changes, and Cancel discards. The control
+                    // is absent once the order is settled, so there is no way to
+                    // start an edit the ops layer would refuse.
+                    if (canEditQuantities) {
+                        if (editing) {
+                            MiniAction(
+                                label = "Cancel",
+                                onClick = {
+                                    draftQty = lines.associate { it.sku to it.qty }
+                                    editing = false
+                                    notice = null
+                                },
+                            )
+                        } else {
+                            MiniAction(
+                                label = "Edit items",
+                                onClick = { editing = true; notice = null },
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(MomoSpace.Sm))
-                data.linesFor(orderId).forEach { line ->
+                lines.forEach { line ->
+                    val draft = draftQty[line.sku] ?: line.qty
                     Row(Modifier.fillMaxWidth().padding(vertical = MomoSpace.Xs)) {
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -543,18 +715,74 @@ fun OrderDetailScreen(
                             Text(
                                 listOfNotNull(
                                     line.variantName.takeIf { it.isNotBlank() },
-                                    "\u00D7 ${line.qty}",
+                                    if (editing) null else "\u00D7 ${line.qty}",
                                 ).joinToString(" \u00B7 "),
                                 style = MomoType.CaptionSmall,
                                 color = MomoColors.TextSecondary,
                             )
                         }
+                        if (editing) {
+                            // The stepper writes ONLY to the draft map.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm),
+                            ) {
+                                QtyStepButton(
+                                    label = "\u2212",
+                                    enabled = draft > 0,
+                                    onClick = {
+                                        draftQty = draftQty + (line.sku to (draft - 1))
+                                    },
+                                )
+                                Text(
+                                    draft.toString(),
+                                    style = MomoType.DataMonospace,
+                                    color = MomoColors.TextPrimary,
+                                )
+                                QtyStepButton(
+                                    label = "+",
+                                    enabled = draft < 99,
+                                    onClick = {
+                                        draftQty = draftQty + (line.sku to (draft + 1))
+                                    },
+                                )
+                            }
+                        } else {
+                            Text(
+                                MomoMoney.format(line.lineTotal),
+                                style = MomoType.DataCaption,
+                                color = MomoColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+                // The subtotal the draft would produce, so the money consequence
+                // of a quantity change is visible BEFORE it is committed.
+                if (hasUnsavedEdits) {
+                    Spacer(Modifier.height(MomoSpace.Sm))
+                    MomoDivider()
+                    Spacer(Modifier.height(MomoSpace.Sm))
+                    val draftSubtotal = lines.sumOf { line ->
+                        (draftQty[line.sku] ?: line.qty).toLong() * line.unitPrice
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            MomoMoney.format(line.lineTotal),
-                            style = MomoType.DataCaption,
-                            color = MomoColors.TextPrimary,
+                            "Subtotal after saving",
+                            style = MomoType.CaptionSmall,
+                            color = MomoColors.TextSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            MomoMoney.format(draftSubtotal),
+                            style = MomoType.DataMonospace,
+                            color = MomoColors.BrandDeep,
                         )
                     }
+                    Text(
+                        "Not saved yet.",
+                        style = MomoType.CaptionSmall,
+                        color = MomoColors.WarningText,
+                    )
                 }
             }
 
@@ -724,8 +952,191 @@ fun OrderDetailScreen(
     }
 }
 
-/** A confirmation with a reason field, shared by the owner's cancel and restore. */
+/**
+ * UAT fix (item 6): one step button on the buffered quantity editor.
+ *
+ * Deliberately not a `MomoField`: a free-text quantity would let the owner type
+ * "0" or a letter and then have to read a refusal. Stepping can only produce a
+ * count the ops layer accepts, so the only refusal left is availability, which
+ * is a real business answer rather than a typo.
+ */
 @Composable
+private fun QtyStepButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(34.dp)
+            .background(MomoColors.SurfaceCard, RoundedCornerShape(MomoRadius.Input))
+            .border(1.dp, MomoColors.BorderSubtle, RoundedCornerShape(MomoRadius.Input))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MomoType.DataCaption,
+            color = if (enabled) MomoColors.BrandDeep else MomoColors.ButtonDisabledContent,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * UAT fix (item 5): the shipping details, shown inline once the parcel is packed.
+ *
+ * The same three fields the full shipping screen owns - courier route, tracking
+ * number and shipping status - placed where the owner already is, so confirming
+ * `Mark as Packed` flows straight into "which courier?" rather than sending them
+ * back to hunt for another control.
+ *
+ * All three write through [MomoStore.updateShipping], which is the ONE place the
+ * A-07 c8 tracking rules and the A-07 c9 stock arithmetic live. A status picked
+ * here therefore dispatches the order exactly as the dedicated screen would, with
+ * no second implementation to drift.
+ */
+@Composable
+private fun ShippingDetailsCard(
+    store: MomoStore,
+    order: Order,
+    offline: Boolean,
+) {
+    var notice by remember(order.orderId) { mutableStateOf<String?>(null) }
+    var isError by remember(order.orderId) { mutableStateOf(false) }
+
+    fun apply(courier: String?, tracking: String?, status: ShippingStatus?) {
+        when (val result = store.updateShipping(order.orderId, courier, tracking, status)) {
+            is OrderOps.ShipResult.Updated -> {
+                notice = "Shipping details saved."
+                isError = false
+            }
+            is OrderOps.ShipResult.Refused -> {
+                notice = result.message
+                isError = true
+            }
+        }
+    }
+
+    MomoCard {
+        Text(
+            "Shipping details",
+            style = MomoType.TitleSmall,
+            color = MomoColors.TextPrimary,
+        )
+        Spacer(Modifier.height(MomoSpace.Sm))
+        KeyValueRow("Recipient", order.recipientName.ifBlank { "\u2014" })
+        KeyValueRow("Mobile", order.mobile.ifBlank { "\u2014" })
+        KeyValueRow("Address", order.addressBlock.ifBlank { "\u2014" })
+
+        Spacer(Modifier.height(MomoSpace.Md))
+        Text(
+            "Courier",
+            style = MomoType.CaptionSmall,
+            color = MomoColors.TextSecondary,
+        )
+        Spacer(Modifier.height(MomoSpace.Xs))
+        // The four routes A-07 c6 names, as tappable chips rather than a dropdown:
+        // there are only four and the chosen one has to stay visible beside the
+        // tracking number it belongs to.
+        Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm)) {
+            OrderOps.DELIVERY_ROUTES.take(2).forEach { route ->
+                StageChip(
+                    label = route,
+                    selected = order.courier == route,
+                    onClick = { apply(courier = route, tracking = null, status = null) },
+                )
+            }
+        }
+        Spacer(Modifier.height(MomoSpace.Xs))
+        Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm)) {
+            OrderOps.DELIVERY_ROUTES.drop(2).forEach { route ->
+                StageChip(
+                    label = route,
+                    selected = order.courier == route,
+                    onClick = { apply(courier = route, tracking = null, status = null) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(MomoSpace.Md))
+        var tracking by remember(order.trackingNo) { mutableStateOf(order.trackingNo) }
+        MomoField(
+            value = tracking,
+            onValueChange = { tracking = it; notice = null },
+            label = "Tracking number",
+            labelOutside = true,
+            supporting = if (order.courier ==
+                ph.edu.umak.momompurin.data.CourierTrackingValidator.PICKUP
+            ) {
+                "Not required for pickup."
+            } else {
+                null
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(MomoSpace.Sm))
+        MiniAction(
+            label = "Save tracking",
+            emphasised = true,
+            enabled = !offline,
+            onClick = { apply(courier = null, tracking = tracking, status = null) },
+        )
+
+        Spacer(Modifier.height(MomoSpace.Md))
+        Text(
+            "Shipping status",
+            style = MomoType.CaptionSmall,
+            color = MomoColors.TextSecondary,
+        )
+        Spacer(Modifier.height(MomoSpace.Xs))
+        Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm)) {
+            listOf(
+                ShippingStatus.FOR_PICKUP,
+                ShippingStatus.IN_TRANSIT,
+                ShippingStatus.RECEIVED,
+            ).forEach { status ->
+                StageChip(
+                    label = status.label,
+                    selected = order.shippingStatus == status,
+                    onClick = {
+                        // A-07 c8: In Transit saves the tracking number typed above
+                        // in the same tap, so the waybill the owner just entered is
+                        // not silently dropped by a status-only save.
+                        apply(
+                            courier = null,
+                            tracking = tracking.takeIf { it.isNotBlank() },
+                            status = status,
+                        )
+                    },
+                )
+            }
+        }
+        if (order.shippingStatus == ShippingStatus.IN_TRANSIT) {
+            Spacer(Modifier.height(MomoSpace.Sm))
+            Text(
+                "Waiting for the customer to confirm receipt.",
+                style = MomoType.CaptionSmall,
+                color = MomoColors.InfoText,
+            )
+        }
+
+        if (notice != null) {
+            Spacer(Modifier.height(MomoSpace.Sm))
+            Text(
+                notice!!,
+                style = MomoType.CaptionBold,
+                color = if (isError) MomoColors.DangerInk else MomoColors.SuccessText,
+            )
+        }
+        if (offline) {
+            Spacer(Modifier.height(MomoSpace.Sm))
+            Text(
+                "Read-only while offline.",
+                style = MomoType.CaptionSmall,
+                color = MomoColors.DangerInk,
+            )
+        }
+    }
+}
+
+/** A confirmation with a reason field, shared by the owner's cancel and restore. */@Composable
 fun OwnerReasonDialog(
     title: String,
     reason: String,

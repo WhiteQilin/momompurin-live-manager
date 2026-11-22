@@ -24,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import ph.edu.umak.momompurin.data.AccountOps
 import ph.edu.umak.momompurin.data.MomoStore
 import ph.edu.umak.momompurin.ui.components.KeyValueRow
@@ -31,6 +33,7 @@ import ph.edu.umak.momompurin.ui.components.MiniAction
 import ph.edu.umak.momompurin.ui.components.MomoButton
 import ph.edu.umak.momompurin.ui.components.MomoCard
 import ph.edu.umak.momompurin.ui.components.MomoConfirmDialog
+import ph.edu.umak.momompurin.ui.components.MomoDivider
 import ph.edu.umak.momompurin.ui.components.MomoField
 import ph.edu.umak.momompurin.ui.components.MomoTopBar
 import ph.edu.umak.momompurin.ui.theme.MomoColors
@@ -48,7 +51,6 @@ import ph.edu.umak.momompurin.ui.theme.MomoType
 fun AccountScreen(
     store: MomoStore,
     onEditProfile: () -> Unit,
-    onChangePassword: () -> Unit,
     onSignOut: () -> Unit,
     onOpenOrders: () -> Unit,
 ) {
@@ -114,8 +116,11 @@ fun AccountScreen(
                 horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm),
                 verticalArrangement = Arrangement.spacedBy(MomoSpace.Sm),
             ) {
-                MiniAction(label = "Edit profile", onClick = onEditProfile, emphasised = true)
-                MiniAction(label = "Change password", onClick = onChangePassword)
+                // UAT fix (item 12): "Edit profile" is now "Edit account", and
+                // Change password lives INSIDE it - one place for everything that
+                // changes the account, rather than two sibling entries whose
+                // difference the user has to guess.
+                MiniAction(label = "Edit account", onClick = onEditProfile, emphasised = true)
                 MiniAction(label = "My orders", onClick = onOpenOrders)
                 MiniAction(
                     label = "Log out",
@@ -153,7 +158,7 @@ fun AccountScreen(
  * to a different address.
  */
 @Composable
-fun EditProfileScreen(store: MomoStore, onBack: () -> Unit) {
+fun EditAccountScreen(store: MomoStore, onBack: () -> Unit) {
     val account = store.session.value
     var fullName by remember { mutableStateOf(account?.name.orEmpty()) }
     var handle by remember { mutableStateOf(account?.handle.orEmpty()) }
@@ -166,7 +171,7 @@ fun EditProfileScreen(store: MomoStore, onBack: () -> Unit) {
     var isError by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
-        MomoTopBar(title = "Edit profile", onBack = onBack)
+        MomoTopBar(title = "Edit account", onBack = onBack)
 
         Column(
             Modifier
@@ -229,7 +234,10 @@ fun EditProfileScreen(store: MomoStore, onBack: () -> Unit) {
             MomoField(
                 value = addressLine,
                 onValueChange = { addressLine = it; message = null },
-                label = "Full address",
+                // UAT fix (item 10): the field asks for the street-level part of
+                // the address, and the label now says exactly that instead of
+                // repeating "Full address" above an already-broken-down cascade.
+                label = "Street Name, Building, House No.",
                 labelOutside = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -256,9 +264,131 @@ fun EditProfileScreen(store: MomoStore, onBack: () -> Unit) {
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            // UAT fix (item 12): Change password is part of editing the account,
+            // not a peer of it. It keeps its own fields and its own Save, because
+            // a password change is a separate confirmation from a profile edit -
+            // but the user finds it where they were already looking.
+            Spacer(Modifier.height(MomoSpace.Xxl))
+            MomoDivider()
+            Spacer(Modifier.height(MomoSpace.Xl))
+            ChangePasswordSection(store = store)
+
             Spacer(Modifier.height(MomoSpace.Xxl))
         }
     }
+}
+
+/**
+ * UAT fix (item 12): the Change password form, embedded in Edit account.
+ *
+ * Extracted from the former standalone [ChangePasswordScreen] so both the
+ * embedded form and any future deep link share ONE implementation - the masking
+ * rule (VisualTransformation, not KeyboardType) and the validation order are
+ * exactly the ones that screen had.
+ */
+@Composable
+private fun ChangePasswordSection(store: MomoStore) {
+    var current by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+    var isError by remember { mutableStateOf(false) }
+    var showPassword by remember { mutableStateOf(false) }
+    val transformation = if (showPassword) {
+        VisualTransformation.None
+    } else {
+        PasswordVisualTransformation()
+    }
+
+    Text(
+        "Change password",
+        style = MomoType.TitleSmall,
+        color = MomoColors.TextPrimary,
+    )
+    Spacer(Modifier.height(MomoSpace.Xs))
+    Text(
+        "Choose a password of at least 8 characters.",
+        style = MomoType.CaptionSmall,
+        color = MomoColors.TextSecondary,
+    )
+    Spacer(Modifier.height(MomoSpace.Md))
+
+    MomoField(
+        value = current,
+        onValueChange = { current = it; message = null },
+        label = "Current password",
+        labelOutside = true,
+        keyboardType = KeyboardType.Password,
+        visualTransformation = transformation,
+        trailing = {
+            LinkText(
+                label = if (showPassword) "Hide" else "Show",
+                onClick = { showPassword = !showPassword },
+                style = MomoType.LabelChip,
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(MomoSpace.Md))
+    MomoField(
+        value = newPassword,
+        onValueChange = { newPassword = it; message = null },
+        label = "New password",
+        labelOutside = true,
+        keyboardType = KeyboardType.Password,
+        visualTransformation = transformation,
+        trailing = {
+            LinkText(
+                label = if (showPassword) "Hide" else "Show",
+                onClick = { showPassword = !showPassword },
+                style = MomoType.LabelChip,
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(MomoSpace.Md))
+    MomoField(
+        value = confirm,
+        onValueChange = { confirm = it; message = null },
+        label = "Confirm new password",
+        labelOutside = true,
+        keyboardType = KeyboardType.Password,
+        visualTransformation = transformation,
+        trailing = {
+            LinkText(
+                label = if (showPassword) "Hide" else "Show",
+                onClick = { showPassword = !showPassword },
+                style = MomoType.LabelChip,
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    if (message != null) {
+        Spacer(Modifier.height(MomoSpace.Md))
+        Text(
+            message!!,
+            style = MomoType.CaptionBold,
+            color = if (isError) MomoColors.DangerInk else MomoColors.SuccessText,
+        )
+    }
+
+    Spacer(Modifier.height(MomoSpace.Md))
+    MomoButton(
+        label = "Update password",
+        onClick = {
+            val failure = store.changePassword(current, newPassword, confirm)
+            isError = failure != null
+            message = failure ?: AccountOps.CHANGES_SAVED
+            if (failure == null) {
+                current = ""
+                newPassword = ""
+                confirm = ""
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**

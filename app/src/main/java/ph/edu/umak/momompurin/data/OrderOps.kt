@@ -91,6 +91,16 @@ object OrderOps {
     /** A-07 c5. */
     const val CHECK_ALL_ITEMS = "Check all items before marking the order as packed."
 
+    /**
+     * A-07 (UAT fix, item 2): the money condition for packing.
+     *
+     * Stated as a positive instruction rather than a bare refusal, because the
+     * owner's next question is always "so what do I do with this order?" - the
+     * answer is to collect the balance on Record payment first.
+     */
+    const val NOT_FULLY_PAID_CANNOT_PACK =
+        "Only fully paid orders can be packed. Record the balance first."
+
     /** A-07 c8. */
     const val ENTER_TRACKING_FIRST = "Enter the tracking number first."
 
@@ -667,6 +677,11 @@ object OrderOps {
      * The decision therefore keys on the STATUS, not the balance: if the order is no
      * longer Paid and it is sitting in To Pack with nothing packed or shipped, it
      * goes back to Waiting for Payment so the owner can re-confirm.
+     *
+     * [OrderStage.TO_SHIP] is deliberately NOT one of the rewindable stages: an
+     * order only reaches it by being packed, and `packingStatus == PACKED` already
+     * guards that case - so listing the stage as well would be a second, weaker
+     * copy of the same rule that could drift away from the first.
      */
     fun stageAfterUnmark(order: Order, newStatus: PaymentStatus): OrderStage {
         if (newStatus == PaymentStatus.PAID) return order.stage
@@ -675,7 +690,6 @@ object OrderOps {
         if (order.shippingStatus != ShippingStatus.NOT_SHIPPED) return order.stage
         return OrderStage.WAITING_PAYMENT
     }
-
     /** A-05 c6: after dispatch the money is with the courier; the lock stands. */
     const val UNMARK_AFTER_DISPATCH = "A dispatched order can no longer be unmarked as Paid."
 
@@ -838,6 +852,19 @@ object OrderOps {
      * The original orders and their invoices are left untouched - only the
      * `combinedShipmentNo` link is added - so A-06 c6's "still show ORD-1036 and
      * ORD-1037 with their own totals and invoices" holds by construction.
+     *
+     * UAT fix (item 3): the two things combining used to get wrong.
+     *
+     *  - The combined orders stayed `HOLD_FOR_COMBINED`, so they sat in `Hold and
+     *    combine orders` forever and the owner could combine the same pair again.
+     *    Combining is the END of holding, so the hold is cleared here.
+     *  - They kept whatever stage they had, which for a seeded hold was `To Pack`
+     *    while the payment read `Paid` - correct by luck, not by construction, and
+     *    an earlier build moved them to `Waiting for Payment` instead. The parcel
+     *    is now boxed and waiting for its courier, so the stage is set explicitly.
+     *
+     * Together those make "the combined orders leave the hold list and appear in To
+     * Pack, Paid" a property of this function rather than of the seed.
      */
     fun combine(
         data: MomoData,
@@ -878,7 +905,21 @@ object OrderOps {
             data = data.copy(
                 orders = data.orders.map { order ->
                     if (order.orderId in orderIds) {
-                        order.copy(combinedShipmentNo = shipmentNo)
+                        order.copy(
+                            combinedShipmentNo = shipmentNo,
+                            // The hold is over: the parcel is packed with its
+                            // shipment-mates and leaves the hold queue.
+                            fulfillment = Fulfillment.SHIP_NOW,
+                            // Only ever FROM a holding stage. An order already in
+                            // transit keeps its place - combining must never rewind
+                            // a dispatched parcel to the packing table.
+                            stage = when (order.stage) {
+                                OrderStage.WAITING_PAYMENT,
+                                OrderStage.TO_PACK,
+                                -> OrderStage.TO_PACK
+                                else -> order.stage
+                            },
+                        )
                     } else {
                         order
                     }
@@ -912,6 +953,15 @@ object OrderOps {
      *
      * [checkedLineIds] is what the checklist currently holds. An early attempt is
      * refused with the criterion's message and the order stays unpacked.
+     *
+     * UAT fix (items 2 and 5), two changes:
+     *
+     *  - the order must be FULLY PAID. A-07's packing step exists to hand a parcel
+     *    to a courier, which is work done on money the shop has received; the UAT
+     *    run found `Partially Paid` orders sitting in `To Pack`, which is exactly
+     *    the state this refusal prevents from becoming a packed parcel.
+     *  - success moves the stage to [OrderStage.TO_SHIP], so a packed order leaves
+     *    the packing queue and the `Pack order` control goes away with it.
      */
     fun markPacked(
         data: MomoData,
@@ -921,6 +971,10 @@ object OrderOps {
     ): PackResult {
         val order = data.order(orderId)
             ?: return PackResult.Refused("That order no longer exists.", data)
+        // A-07: the money comes first. Checked before the item ticks so a
+        // partially-paid order states the real blocker instead of asking the owner
+        // to tick items for a packing job that will then be refused.
+        if (!order.isPaid) return PackResult.Refused(NOT_FULLY_PAID_CANNOT_PACK, data)
         val lines = data.linesFor(orderId)
         if (lines.isEmpty() || !lines.all { it.lineId in checkedLineIds }) {
             return PackResult.Refused(CHECK_ALL_ITEMS, data)
@@ -928,7 +982,17 @@ object OrderOps {
         if (order.packingStatus == PackingStatus.PACKED) {
             return PackResult.Packed(data)
         }
-        val updated = order.copy(packingStatus = PackingStatus.PACKED, packedAt = now)
+        val updated = order.copy(
+            packingStatus = PackingStatus.PACKED,
+            packedAt = now,
+            // UAT fix: a packed order is no longer packing work. Anything already
+            // at or past TO_SHIP is left alone, so re-saving a packed order cannot
+            // pull a dispatched parcel backwards.
+            stage = when (order.stage) {
+                OrderStage.TO_PACK -> OrderStage.TO_SHIP
+                else -> order.stage
+            },
+        )
         return PackResult.Packed(
             data.copy(
                 orders = data.orders.map { if (it.orderId == orderId) updated else it },
@@ -1032,7 +1096,6 @@ object OrderOps {
                 else -> order.stage
             },
         )
-
         return ShipResult.Updated(
             data.copy(
                 products = products,
@@ -1056,6 +1119,84 @@ object OrderOps {
     /** A-07 c6: the four routes the Delivery route dropdown offers. */
     val DELIVERY_ROUTES = listOf("J&T Express", "TikTok Shop", "Lalamove/Grab", "Pickup")
 
+    // ---------------------------------------------------------------------------
+    // A-07 c7 + UAT fix (item 5): the CUSTOMER confirms the parcel arrived
+    // ---------------------------------------------------------------------------
+
+    /** UAT fix (item 5): the parcel has not left yet, so there is nothing to confirm. */
+    const val NOTHING_TO_RECEIVE =
+        "This order has not shipped yet, so there is nothing to confirm."
+
+    /** UAT fix (item 5): the confirmation the customer sees after tapping. */
+    const val ORDER_RECEIVED_CONFIRMED = "Thanks! Your order is now marked as received."
+
+    /** UAT fix (item 5): the stage a received order must already be past. */
+    sealed interface ReceiveResult : HasData {
+        data class Received(override val data: MomoData) : ReceiveResult
+        data class Refused(val message: String, override val data: MomoData) : ReceiveResult
+    }
+
+    /**
+     * UAT fix (item 5): the CUSTOMER says the parcel arrived.
+     *
+     * The UAT compromise recorded in the report: A-07 lets the OWNER set `Received`
+     * by hand, but the person who actually knows whether the parcel turned up is
+     * the customer, and leaving the last step to the seller means an order can only
+     * close when the seller remembers to close it. The customer therefore gets a
+     * prominent `Order Received` action - and it is deliberately reachable ONLY
+     * from [ShippingStatus.IN_TRANSIT]:
+     *
+     *  - before dispatch there is no parcel, so a `Received` confirmation would be
+     *    a claim about an event that has not happened;
+     *  - after the owner has already marked it `Received` there is nothing left to
+     *    confirm, and re-confirming would rewrite the completion time.
+     *
+     * Completing sets BOTH halves: the shipping status and the lifecycle stage, so
+     * the badge row and the tab partition cannot disagree about whether the order
+     * is finished.
+     */
+    fun markReceived(
+        data: MomoData,
+        orderId: String,
+        by: CancelledBy,
+        now: Long = System.currentTimeMillis(),
+    ): ReceiveResult {
+        val order = data.order(orderId)
+            ?: return ReceiveResult.Refused("That order no longer exists.", data)
+
+        if (order.shippingStatus == ShippingStatus.RECEIVED) {
+            return ReceiveResult.Refused("This order is already marked as received.", data)
+        }
+        if (order.shippingStatus != ShippingStatus.IN_TRANSIT) {
+            return ReceiveResult.Refused(NOTHING_TO_RECEIVE, data)
+        }
+        if (order.stage == OrderStage.CANCELLED) {
+            return ReceiveResult.Refused("A cancelled order cannot be received.", data)
+        }
+
+        val updated = order.copy(
+            shippingStatus = ShippingStatus.RECEIVED,
+            stage = OrderStage.COMPLETED,
+        )
+        return ReceiveResult.Received(
+            data.copy(
+                orders = data.orders.map { if (it.orderId == orderId) updated else it },
+                activityLog = data.activityLog + log(
+                    entryCount = data.activityLog.size,
+                    action = "${by.label} confirmed receipt of $orderId",
+                    entityType = "Order",
+                    entityId = orderId,
+                    detail = "marked Received and Completed",
+                    now = now,
+                    actor = if (by == CancelledBy.CUSTOMER) {
+                        order.customerEmail
+                    } else {
+                        SeedData.OWNER_EMAIL
+                    },
+                ),
+            ),
+        )
+    }
     /** A-07 c6: the text Copy shipping details places on the clipboard. */
     fun shippingDetailsText(data: MomoData, orderId: String): String {
         val order = data.order(orderId) ?: return ""

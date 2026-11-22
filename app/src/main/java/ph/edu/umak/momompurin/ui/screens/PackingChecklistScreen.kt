@@ -194,7 +194,7 @@ fun PackingChecklistScreen(
                         showDialog = true
                     }
                 },
-                enabled = !offline && !alreadyPacked,
+                enabled = !offline && !alreadyPacked && order.isPaid,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (!allChecked && !alreadyPacked) {
@@ -202,6 +202,16 @@ fun PackingChecklistScreen(
                     OrderOps.CHECK_ALL_ITEMS,
                     style = MomoType.CaptionSmall,
                     color = MomoColors.TextSecondary,
+                )
+            }
+            // UAT fix (item 2): the money rule is stated on the screen, so an owner
+            // who reaches a partially-paid order is told what is missing instead of
+            // finding a disabled button and no reason.
+            if (!order.isPaid && !alreadyPacked) {
+                Text(
+                    OrderOps.NOT_FULLY_PAID_CANNOT_PACK,
+                    style = MomoType.CaptionSmall,
+                    color = MomoColors.WarningText,
                 )
             }
             if (offline) {
@@ -228,7 +238,10 @@ fun PackingChecklistScreen(
                 showDialog = false
                 when (val result = store.markPacked(orderId, checked)) {
                     is OrderOps.PackResult.Packed -> {
-                        notice = "Order marked as packed."
+                        // UAT fix (item 5): name the stage the order just moved to,
+                        // so "packed" and the order leaving this queue are one
+                        // piece of news rather than two surprises.
+                        notice = "Order marked as packed and moved to To Ship."
                         isError = false
                     }
                     is OrderOps.PackResult.Refused -> {
