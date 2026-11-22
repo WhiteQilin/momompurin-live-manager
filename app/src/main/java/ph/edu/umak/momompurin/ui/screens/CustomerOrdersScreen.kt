@@ -140,9 +140,13 @@ fun CustomerOrderCard(order: Order, onOpen: () -> Unit) {
         // Payment first, then the lifecycle stage - the same order the owner's
         // card uses. Two orders in one list must not disagree about which label
         // leads, and money is the fact a customer scans for.
+        //
+        // Patch 2: both badges are the DERIVED pair, so the customer's list can
+        // never show `Paid` beside a balance or echo a paid hold's
+        // `Waiting for Payment` stage. The owner and customer now read one rule.
         Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Xs)) {
-            StatusBadge(MomoBadges.forPayment(order.paymentStatus))
-            StatusBadge(MomoBadges.forStage(order.stage))
+            StatusBadge(MomoBadges.forPayment(order.effectivePaymentStatus))
+            StatusBadge(MomoBadges.forOrderStage(order))
         }
         // A-16 c3: the tracking number appears only from In Transit onward.
         if (order.showsTracking && order.trackingNo.isNotBlank()) {
@@ -333,7 +337,10 @@ fun CustomerOrderDetailScreen(
 
     // A-16 c6: cancellable while Order Placed or Waiting for Payment; A-16 c7:
     // disabled once Paid.
-    val canCancel = !order.isPaid && (
+    //
+    // Patch 2: `isFullyPaid` is the money's answer, so a stale Paid flag cannot
+    // disable a customer's cancel on an order that still owes money.
+    val canCancel = !order.isFullyPaid && (
         order.stage == OrderStage.ORDER_PLACED ||
             order.stage == OrderStage.WAITING_PAYMENT
         )
@@ -350,7 +357,7 @@ fun CustomerOrderDetailScreen(
     val canConfirmReceipt = order.shippingStatus == ShippingStatus.IN_TRANSIT
 
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
-        MomoTopBar(title = orderId, onBack = onBack, contextPill = order.stage.label)
+        MomoTopBar(title = orderId, onBack = onBack, contextPill = order.stageLabel)
 
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -368,7 +375,15 @@ fun CustomerOrderDetailScreen(
                     Text("Status", style = MomoType.TitleSmall, color = MomoColors.TextPrimary)
                     Spacer(Modifier.height(MomoSpace.Sm))
                     // A-16 c2: three separate labels, never merged into one.
-                    StatusRow("Payment", MomoBadges.forPayment(order.paymentStatus))
+                    //
+                    // Patch 2: the payment label is the derived one, and a paid hold
+                    // gets an explicit fourth row naming the hold - otherwise the
+                    // customer saw `Paid` with no explanation of why the parcel had
+                    // not moved, which is the same contradiction in customer terms.
+                    StatusRow("Payment", MomoBadges.forPayment(order.effectivePaymentStatus))
+                    if (order.isHeld && order.isFullyPaid) {
+                        StatusRow("Shipment", MomoBadges.forHeld())
+                    }
                     StatusRow("Packing", MomoBadges.forPacking(order.packingStatus))
                     StatusRow("Shipping", MomoBadges.forShipping(order.shippingStatus))
                     // A-16 c3: the tracking number from In Transit onward only.
@@ -502,7 +517,13 @@ fun CustomerOrderDetailScreen(
             }
 
             // A-15 c8's off-app payment note, shown to the customer on their order.
-            if (order.stage == OrderStage.WAITING_PAYMENT) {
+            //
+            // Patch 2: only while money is actually OWED. A paid held order keeps
+            // the WAITING_PAYMENT stage until A-06 combines it, so gating on the
+            // stage alone told a customer who had already paid to "pay by GCash,
+            // Maya or Bank Transfer" - a request for money the shop already had.
+            // `isAwaitingPayment` asks the money question the note is about.
+            if (order.isAwaitingPayment) {
                 item {
                     MomoCard {
                         Text(

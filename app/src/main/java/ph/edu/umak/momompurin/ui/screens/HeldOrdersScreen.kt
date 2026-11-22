@@ -317,9 +317,15 @@ fun HeldOrdersScreen(
                 pendingCustomer = null
                 when (val result = store.combineOrders(chosen.map { it.orderId })) {
                     is OrderOps.CombineResult.Combined -> {
-                        notice = "Combined as ${result.shipmentNo} \u00B7 " +
-                            MomoMoney.format(result.total) + " \u00B7 moved to To Pack."
-                        isError = false
+                        // Patch 5: the snackbar, like every other save confirmation.
+                        // The combined orders LEAVE this list on the same frame, so
+                        // an inline line under the (now shorter) list was easy to
+                        // miss - the screen appeared to have simply lost two rows.
+                        notice = null
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.show(
+                            "Combined as ${result.shipmentNo} \u00B7 " +
+                                MomoMoney.format(result.total) + " \u00B7 moved to To Pack.",
+                        )
                         // The orders are no longer held, so their selection is
                         // meaningless - clearing it keeps the screen honest rather
                         // than showing a stale tick against a row that vanished.

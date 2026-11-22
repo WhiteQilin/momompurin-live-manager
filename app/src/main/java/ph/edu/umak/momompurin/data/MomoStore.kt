@@ -422,7 +422,23 @@ class MomoStore(seed: MomoData = SeedData.build()) {
         return when (val result = AccountOps.register(_data.value, form, now)) {
             is AccountOps.RegisterResult.Failure -> result.message
             is AccountOps.RegisterResult.Success -> {
-                update { it.copy(accounts = it.accounts + result.account) }
+                // Patch 1: the append is guarded a SECOND time against the CURRENT
+                // snapshot. [AccountOps.register] validated against `_data.value` as
+                // it was read a moment ago; this re-checks inside `update`, which is
+                // the only place the swap is atomic. Without it, two registrations
+                // racing on the same address could each pass their own validation
+                // and both be appended - the duplicate the criterion forbids, arrived
+                // at through the one path the ops-layer check cannot see.
+                var refused: String? = null
+                update { current ->
+                    if (AccountOps.duplicateEmail(current, result.account.email)) {
+                        refused = AccountOps.DUPLICATE_EMAIL
+                        current
+                    } else {
+                        current.copy(accounts = current.accounts + result.account)
+                    }
+                }
+                if (refused != null) return refused
                 _session.value = result.account
                 null
             }
@@ -771,6 +787,31 @@ class MomoStore(seed: MomoData = SeedData.build()) {
         return commit(OrderOps.markPacked(_data.value, orderId, checkedLineIds, now))
     }
 
+    /**
+     * Patch 4: mark a whole combined shipment packed, as one parcel.
+     *
+     * The members are resolved from the CURRENT snapshot rather than taken from the
+     * caller, so a screen holding a stale list cannot pack a shipment that has since
+     * shrunk - the scope is whatever the shipment is now.
+     */
+    fun markShipmentPacked(
+        orderId: String,
+        checkedLineIds: Set<String>,
+        now: Long = System.currentTimeMillis(),
+    ): OrderOps.PackResult {
+        if (ownerReadOnly) {
+            return OrderOps.PackResult.Refused(OFFLINE_READ_ONLY, _data.value)
+        }
+        return commit(
+            OrderOps.markShipmentPacked(
+                _data.value,
+                OrderOps.shipmentScope(_data.value, orderId),
+                checkedLineIds,
+                now,
+            ),
+        )
+    }
+
     /** A-07 c6-c9: route, tracking number and status. */
     fun updateShipping(
         orderId: String,
@@ -784,6 +825,37 @@ class MomoStore(seed: MomoData = SeedData.build()) {
         if (ownerReadOnly) return OrderOps.ShipResult.Refused(OFFLINE_READ_ONLY, _data.value)
         return commit(
             OrderOps.updateShipping(_data.value, orderId, courier, trackingNo, status, now),
+        )
+    }
+
+    /**
+     * Patch 4: a shipping update for a whole combined shipment.
+     *
+     * The courier and waybill describe the PARCEL, so they are recorded on every
+     * member and each member's stock is deducted exactly once. Without this a
+     * shipment could be dispatched with one member's stock still held.
+     *
+     * The scope is resolved here from the live snapshot, for the same reason
+     * [markShipmentPacked] does it: the shipment is whatever it is now, not whatever
+     * the screen last saw.
+     */
+    fun updateShipmentShipping(
+        orderId: String,
+        courier: String?,
+        trackingNo: String?,
+        status: ShippingStatus?,
+        now: Long = System.currentTimeMillis(),
+    ): OrderOps.ShipResult {
+        if (ownerReadOnly) return OrderOps.ShipResult.Refused(OFFLINE_READ_ONLY, _data.value)
+        return commit(
+            OrderOps.updateShipmentShipping(
+                _data.value,
+                OrderOps.shipmentScope(_data.value, orderId),
+                courier,
+                trackingNo,
+                status,
+                now,
+            ),
         )
     }
 

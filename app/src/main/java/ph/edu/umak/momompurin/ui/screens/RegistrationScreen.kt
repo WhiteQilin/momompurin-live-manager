@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +77,19 @@ fun RegistrationScreen(
     // UAT fix (item 14): the RA 10173 confirmation, shown once the form is valid.
     var showPrivacy by remember { mutableStateOf(false) }
 
+    // Patch 1: the email is checked against the live accounts on every keystroke.
+    //
+    // The uniqueness rule used to be enforced only inside AccountOps.register, so
+    // a customer learned their email was taken after filling the whole form and
+    // tapping through the privacy dialog. Reading `store.data` here recomposes as
+    // soon as another account exists, and asking [AccountOps.duplicateEmail] rather
+    // than re-implementing the comparison is what keeps this warning and the ops
+    // layer's refusal from ever disagreeing about which addresses are taken.
+    val data by store.data.collectAsState()
+    val emailDuplicate = remember(data.accounts, email) {
+        AccountOps.duplicateEmail(data, email)
+    }
+
     // C.2: the mismatch is its own inline error under its own field, checked on
     // every keystroke, so a tester sees it the moment the two diverge rather than
     // only after tapping Create account.
@@ -110,6 +124,14 @@ fun RegistrationScreen(
         }
         if (emailInvalid) {
             error = AccountOps.INVALID_EMAIL
+            return
+        }
+        // Patch 1: a taken address blocks BEFORE the privacy dialog, so the
+        // customer is not asked to consent to saving details for an account that
+        // cannot be created. The refusal is the same string the ops layer returns,
+        // so the message cannot drift from the documented A-11 c5 wording.
+        if (emailDuplicate) {
+            error = AccountOps.DUPLICATE_EMAIL
             return
         }
         if (mobileInvalid || mobileWrongPrefix) {
@@ -202,7 +224,16 @@ fun RegistrationScreen(
                 keyboardType = KeyboardType.Email,
                 // UAT fix (item 14): the warning appears as the text goes wrong,
                 // not after a submit.
-                error = if (emailInvalid) AccountOps.INVALID_EMAIL else null,
+                //
+                // Patch 1: the taken-address warning is the same live treatment, and
+                // it outranks the format warning - an address that is both malformed
+                // and taken is impossible, because [AccountOps.duplicateEmail]
+                // refuses to call a malformed address "taken" at all.
+                error = when {
+                    emailInvalid -> AccountOps.INVALID_EMAIL
+                    emailDuplicate -> AccountOps.DUPLICATE_EMAIL
+                    else -> null
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(MomoSpace.Md))

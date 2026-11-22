@@ -53,6 +53,18 @@ object OrderOps {
     /** A-04 c5. */
     const val INVALID_SHIPPING_FEE = "Enter a valid shipping fee."
 
+    /**
+     * Patch 3 (A-03): why a held order's shipping fee is locked at P0.00.
+     *
+     * The helper text the owner's invoice card prints, and the reasoning the ops
+     * layer enforces: a `Hold For Combined Shipping` parcel has no freight of its
+     * own - the cost belongs to the combined parcel A-06 creates later. Charging
+     * freight now would bill the customer for a box that does not exist yet, and
+     * would then have to be charged AGAIN when the shipment is combined.
+     */
+    const val HELD_SHIPPING_FEE_LOCKED =
+        "Shipping fee is set once held orders are combined or cleared for shipping."
+
     /** A-04 c7. */
     const val ORDER_CANCELLED = "Order cancelled. Reserved stock returned."
 
@@ -290,6 +302,21 @@ object OrderOps {
     }
 
     /**
+     * Patch 3 (A-03): is this order's shipping fee locked at P0.00 right now?
+     *
+     * True for an incoming order the buyer chose `Hold For Combined Shipping` on.
+     * The lock LIFTS the moment the parcel stops being an individual hold: A-06's
+     * [combine] rewrites `fulfillment` to [Fulfillment.SHIP_NOW], so the combined
+     * orders - which are precisely the ones whose freight now exists - accept a
+     * fee again through the normal path.
+     *
+     * Note this is keyed on [Order.isHeld] rather than on the stage, so clearing
+     * the order for shipping by combining it is what unlocks the field; there is no
+     * separate "unlock" flag that could drift out of step with the hold.
+     */
+    fun shippingFeeLocked(order: Order): Boolean = order.isHeld
+
+    /**
      * A-04 c5-c6: send the invoice, set Waiting for Payment, start the 24-hour
      * window.
      *
@@ -312,13 +339,28 @@ object OrderOps {
         val fee = parseFee(shippingFeeText)
             ?: return InvoiceResult.Refused(INVALID_SHIPPING_FEE, data)
 
+        // Patch 3 (A-03): a held order is invoiced at P0.00 of freight, whatever the
+        // field says. Enforced HERE as well as by the disabled input, because the
+        // field is a hint and this is the gate: a stale screen, a restored order or
+        // a future caller must not be able to put freight on a parcel whose
+        // combined shipment has not been created yet.
+        if (shippingFeeLocked(order) && fee > 0L) {
+            return InvoiceResult.Refused(HELD_SHIPPING_FEE_LOCKED, data)
+        }
+
         val invoiceNo = "MP-" + orderId.removePrefix("ORD-")
-        val updated = order.copy(
-            stage = OrderStage.WAITING_PAYMENT,
-            shippingFee = fee,
-            invoiceNo = invoiceNo,
-            invoicedAt = now,
-            paymentDeadline = now + PAYMENT_WINDOW_MILLIS,
+        // Patch 2: the fee moves `total`, so the status is re-derived with it. An
+        // order that had no fee and no payment yet re-derives to Unpaid (no change);
+        // the point is that this path can no longer leave a status whose "fully
+        // paid" claim the new total contradicts.
+        val updated = normalisePayment(
+            order.copy(
+                stage = OrderStage.WAITING_PAYMENT,
+                shippingFee = fee,
+                invoiceNo = invoiceNo,
+                invoicedAt = now,
+                paymentDeadline = now + PAYMENT_WINDOW_MILLIS,
+            ),
         )
         return InvoiceResult.Sent(
             data = data.copy(
@@ -465,13 +507,15 @@ object OrderOps {
             val qty = needed[product.sku] ?: 0
             if (qty == 0) product else product.copy(reserved = product.reserved + qty)
         }
-        val restored = order.copy(
-            stage = OrderStage.ORDER_PLACED,
-            cancellation = null,
-            invoiceNo = "",
-            invoicedAt = null,
-            paymentDeadline = null,
-            shippingFee = 0L,
+        val restored = normalisePayment(
+            order.copy(
+                stage = OrderStage.ORDER_PLACED,
+                cancellation = null,
+                invoiceNo = "",
+                invoicedAt = null,
+                paymentDeadline = null,
+                shippingFee = 0L,
+            ),
         )
         return CancelResult.Cancelled(
             data = data.copy(
@@ -654,8 +698,22 @@ object OrderOps {
      *
      *  - a shipment goes to [OrderStage.TO_PACK], because packing is the next thing
      *    that actually has to happen;
-     *  - a held order keeps its stage, because it is waiting on a combined shipment
-     *    rather than on the money, and the Paid badge alone tells the truth.
+     *  - a held order goes to [OrderStage.TO_PACK] as well.
+     *
+     * ## The held case (Patch 2 - the ORD-1053 root cause)
+     *
+     * This used to `return order.stage` for a held order, on the theory that the
+     * Paid badge alone told the truth while the order waited for A-06's Combine.
+     * It did not: the stage badge renders the STAGE, so the card read `Paid` beside
+     * `Waiting for Payment` - the exact contradiction the bug report lists, and the
+     * reason a tester could not tell whether ORD-1053 had been paid.
+     *
+     * A paid held order is no longer waiting for the money - it is waiting for the
+     * parcel to be combined - so it leaves `Waiting for Payment` like any other
+     * fully-paid order. It does NOT enter the packing queue yet, because
+     * `MomoData.toPackOrders` already excludes held orders (A-02 c2), so the
+     * Dashboard tile and the To Pack tab still do not count it. Its badge reads
+     * `Held` (see `MomoBadges.forOrderStage`), which is the queue it is in.
      *
      * Any later stage (packed, shipped, completed, cancelled) is left alone: a
      * payment arriving on a packed order must not rewind it to To Pack.
@@ -663,7 +721,10 @@ object OrderOps {
     fun stageAfterFullPayment(order: Order, newBalance: Long): OrderStage {
         if (newBalance > 0L) return order.stage
         if (order.stage != OrderStage.WAITING_PAYMENT) return order.stage
-        return if (order.isHeld) order.stage else OrderStage.TO_PACK
+        // Both a shipment and a hold leave Waiting for Payment here. A held order's
+        // `toPackOrders` exclusion is what keeps it out of the packing QUEUE; the
+        // stage it leaves behind must still stop naming the money.
+        return OrderStage.TO_PACK
     }
 
     /**
@@ -832,6 +893,27 @@ object OrderOps {
         else -> PaymentStatus.PARTIALLY_PAID
     }
 
+    /**
+     * Patch 2: re-derive `paymentStatus` from the money on an order being written.
+     *
+     * ## Why every money-changing write needs this
+     *
+     * [statusFor] pins the rule at the moment a PAYMENT is recorded, but the total
+     * it is compared against is not a constant: sending an invoice sets the shipping
+     * fee, editing an unsettled order rewrites the subtotal, and restoring an order
+     * clears the fee. Each of those can move `total` across `amountPaid` and turn a
+     * fully-paid order into one that owes money - while the stored status still
+     * reads `Paid`. That stale `Paid` is then printed next to a non-zero balance,
+     * which is the contradiction the report shows.
+     *
+     * Applying this once, on the write path, means the stored status can never
+     * disagree with the arithmetic. The UI derives its badge from the same rule
+     * (see `Order.effectivePaymentStatus`) so a row that predates this fix is also
+     * displayed correctly, but a write here keeps the DATA honest too.
+     */
+    fun normalisePayment(order: ph.edu.umak.momompurin.data.entity.Order) =
+        order.copy(paymentStatus = statusFor(order.amountPaid, order.total))
+
     // ---------------------------------------------------------------------------
     // A-06: combine held orders
     // ---------------------------------------------------------------------------
@@ -905,20 +987,28 @@ object OrderOps {
             data = data.copy(
                 orders = data.orders.map { order ->
                     if (order.orderId in orderIds) {
-                        order.copy(
-                            combinedShipmentNo = shipmentNo,
-                            // The hold is over: the parcel is packed with its
-                            // shipment-mates and leaves the hold queue.
-                            fulfillment = Fulfillment.SHIP_NOW,
-                            // Only ever FROM a holding stage. An order already in
-                            // transit keeps its place - combining must never rewind
-                            // a dispatched parcel to the packing table.
-                            stage = when (order.stage) {
-                                OrderStage.WAITING_PAYMENT,
-                                OrderStage.TO_PACK,
-                                -> OrderStage.TO_PACK
-                                else -> order.stage
-                            },
+                        normalisePayment(
+                            order.copy(
+                                combinedShipmentNo = shipmentNo,
+                                // The hold is over: the parcel is packed with its
+                                // shipment-mates and leaves the hold queue.
+                                fulfillment = Fulfillment.SHIP_NOW,
+                                // Only ever FROM a holding stage. An order already in
+                                // transit keeps its place - combining must never rewind
+                                // a dispatched parcel to the packing table.
+                                //
+                                // Patch 2: WAITING_PAYMENT is included because every
+                                // combinable order is PAID (checked above), so a paid
+                                // row sitting there is precisely the contradiction
+                                // this fix removes - combining it must clear the stage
+                                // too, not preserve it.
+                                stage = when (order.stage) {
+                                    OrderStage.WAITING_PAYMENT,
+                                    OrderStage.TO_PACK,
+                                    -> OrderStage.TO_PACK
+                                    else -> order.stage
+                                },
+                            ),
                         )
                     } else {
                         order
@@ -937,6 +1027,106 @@ object OrderOps {
             shipmentNo = shipmentNo,
             total = total,
         )
+    }
+
+    // ---------------------------------------------------------------------------
+    // A-06 c3 / Patch 4: one combined shipment moves as ONE parcel
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Patch 4: mark every order in a combined shipment packed.
+     *
+     * A combined shipment is a single parcel (A-06 c3), so packing it is one act:
+     * the owner ticks one checklist and the WHOLE shipment leaves the packing
+     * queue. Applying [markPacked] to only the tapped order would leave the card
+     * half-packed - one member at `To Ship`, its shipment-mate still at `To Pack` -
+     * which is a parcel the shop has physically boxed reading as two different
+     * states, and it makes the next tap re-pack a box that is already taped.
+     *
+     * Each member's own checklist is required, because each order keeps its own
+     * lines: [checkedLineIds] is the union the caller gathered from the members it
+     * is packing. All-or-nothing - if one member refuses (a balance appeared on it,
+     * say), nothing is written, so a shipment can never be left partly advanced.
+     */
+    fun markShipmentPacked(
+        data: MomoData,
+        orderIds: List<String>,
+        checkedLineIds: Set<String>,
+        now: Long = System.currentTimeMillis(),
+    ): PackResult {
+        if (orderIds.isEmpty()) return PackResult.Refused("That order no longer exists.", data)
+
+        // Patch 4: the scope is EXPANDED here, not trusted from the caller.
+        //
+        // A call site that passes one member's id - which is the natural thing to do
+        // from a detail screen - must still pack the whole parcel. Expanding inside
+        // the op means the "one shipment, one parcel" rule holds no matter which
+        // member the UI happened to hand over, and there is no way to reach this
+        // function with half a shipment.
+        val scope = orderIds.flatMap { shipmentScope(data, it) }.distinct()
+
+        // Validate EVERY member against the same snapshot before writing any of
+        // them, so a refusal on the last one cannot leave the first ones packed.
+        var working = data
+        for (orderId in scope) {
+            val result = markPacked(working, orderId, checkedLineIds, now)
+            if (result is PackResult.Refused) return PackResult.Refused(result.message, data)
+            working = result.data
+        }
+        return PackResult.Packed(working)
+    }
+
+    /**
+     * Patch 4: apply a shipping update to every order in a combined shipment.
+     *
+     * The courier and waybill belong to the PARCEL, so recording them once must not
+     * leave one member of the shipment un-shipped and its stock un-deducted. Each
+     * member runs through [updateShipping], so the A-07 c8 tracking rules and the
+     * A-07 c9 stock arithmetic are the same ones a single order gets - this is a
+     * fan-out, not a second implementation.
+     *
+     * The stock effect stays correct because [updateShipping] dispatches on the
+     * FIRST transition only: each member deducts its own lines exactly once.
+     *
+     * All-or-nothing: every member is validated against the same snapshot first, so
+     * a malformed waybill on the last one cannot leave the earlier ones dispatched.
+     */
+    fun updateShipmentShipping(
+        data: MomoData,
+        orderIds: List<String>,
+        courier: String?,
+        trackingNo: String?,
+        status: ShippingStatus?,
+        now: Long = System.currentTimeMillis(),
+    ): ShipResult {
+        if (orderIds.isEmpty()) return ShipResult.Refused("That order no longer exists.", data)
+
+        // Patch 4: the scope is expanded here for the same reason
+        // [markShipmentPacked] does it - a detail screen passes one member's id and
+        // the whole parcel must still move.
+        val scope = orderIds.flatMap { shipmentScope(data, it) }.distinct()
+
+        var working = data
+        for (orderId in scope) {
+            val result = updateShipping(working, orderId, courier, trackingNo, status, now)
+            if (result is ShipResult.Refused) return ShipResult.Refused(result.message, data)
+            working = result.data
+        }
+        return ShipResult.Updated(working)
+    }
+
+    /**
+     * Patch 4: the member orders a pack/ship action on [orderId] must cover.
+     *
+     * Returns the whole combined shipment when the order belongs to one, and the
+     * order alone otherwise - so a call site never has to ask whether it is looking
+     * at a shipment, and cannot accidentally act on half of one.
+     */
+    fun shipmentScope(data: MomoData, orderId: String): List<String> {
+        val order = data.order(orderId) ?: return listOf(orderId)
+        val shipmentNo = order.combinedShipmentNo ?: return listOf(orderId)
+        val members = data.shipmentMembers(shipmentNo)
+        return if (members.size >= 2) members.map { it.orderId } else listOf(orderId)
     }
 
     // ---------------------------------------------------------------------------
@@ -1260,7 +1450,7 @@ object OrderOps {
             if (delta == 0) product
             else product.copy(reserved = (product.reserved + delta).coerceAtLeast(0))
         }
-        val updated = order.copy(itemSubtotal = subtotal)
+        val updated = normalisePayment(order.copy(itemSubtotal = subtotal))
 
         return EditResult.Applied(
             data.copy(

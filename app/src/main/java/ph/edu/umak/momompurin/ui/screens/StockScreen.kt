@@ -888,8 +888,17 @@ fun StockAdjustScreen(
                         isError = true
                     } else {
                         store.adjustStock(sku, value!!, reason)
-                        notice = "Stock adjusted."
-                        isError = false
+                        // Patch 5: "Stock adjusted." used to render as a quiet line
+                        // directly above the button, inside the scroll - so on a
+                        // short screen the owner tapped Save, saw nothing move, and
+                        // could not tell whether the count had taken. It now goes
+                        // through the app-wide snackbar, which floats above the
+                        // content and is the same confirmation every other save in
+                        // the app raises.
+                        notice = null
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.show(
+                            "Stock adjusted.",
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),

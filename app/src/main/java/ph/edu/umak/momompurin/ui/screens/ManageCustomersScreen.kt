@@ -283,8 +283,11 @@ fun CustomerProfileScreen(
                                 color = MomoColors.BrandDeep,
                                 modifier = Modifier.weight(1f),
                             )
+                            // Patch 2: the contradiction-free label, so a paid hold
+                            // does not read "Waiting for Payment" in the customer's
+                            // order history either.
                             Text(
-                                order.stage.label,
+                                order.stageLabel,
                                 style = MomoType.CaptionSmall,
                                 color = MomoColors.TextSecondary,
                             )

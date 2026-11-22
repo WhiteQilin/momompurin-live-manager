@@ -260,7 +260,21 @@ fun EditAccountScreen(store: MomoStore, onBack: () -> Unit) {
                     )
                     isError = failure != null
                     // A-17 c7: the success string the criterion quotes.
-                    message = failure ?: AccountOps.CHANGES_SAVED
+                    //
+                    // Patch 5: routed through the app-wide snackbar. This screen is a
+                    // long scrolling form, so an inline confirmation under the last
+                    // field - which is where the button already is - was the one
+                    // place the owner was ALREADY looking when they tapped Save,
+                    // meaning a successful save and a no-op looked identical. The
+                    // snackbar floats above the content and is the same control
+                    // every other confirmation in the app uses.
+                    val text = failure ?: AccountOps.CHANGES_SAVED
+                    message = null
+                    if (failure != null) {
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.error(text)
+                    } else {
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.show(text)
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -380,7 +394,17 @@ private fun ChangePasswordSection(store: MomoStore) {
         onClick = {
             val failure = store.changePassword(current, newPassword, confirm)
             isError = failure != null
-            message = failure ?: AccountOps.CHANGES_SAVED
+            // Patch 5: the snackbar, for the same reason as Save changes above -
+            // and it matters more here, because the form CLEARS its fields on
+            // success: an inline line that vanished with the mutation was
+            // indistinguishable from the form simply having reset.
+            val text = failure ?: AccountOps.CHANGES_SAVED
+            message = null
+            if (failure != null) {
+                ph.edu.umak.momompurin.ui.components.MomoMessages.error(text)
+            } else {
+                ph.edu.umak.momompurin.ui.components.MomoMessages.show(text)
+            }
             if (failure == null) {
                 current = ""
                 newPassword = ""
@@ -499,7 +523,16 @@ fun ChangePasswordScreen(store: MomoStore, onBack: () -> Unit) {
                 onClick = {
                     val failure = store.changePassword(current, newPassword, confirm)
                     isError = failure != null
-                    message = failure ?: AccountOps.CHANGES_SAVED
+                    // Patch 5: the snackbar, matching the embedded form. This screen
+                    // is only reachable from a saved deep link, so it must not be the
+                    // one place a save confirmation still renders inline.
+                    val text = failure ?: AccountOps.CHANGES_SAVED
+                    message = null
+                    if (failure != null) {
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.error(text)
+                    } else {
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.show(text)
+                    }
                     if (failure == null) {
                         current = ""
                         newPassword = ""

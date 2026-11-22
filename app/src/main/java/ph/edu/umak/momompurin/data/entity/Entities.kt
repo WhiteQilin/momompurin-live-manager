@@ -275,6 +275,69 @@ data class Order(
     val isPaid: Boolean get() = paymentStatus == PaymentStatus.PAID
 
     /**
+     * Patch 2: the payment status this order's MONEY actually implies.
+     *
+     * The stored [paymentStatus] is a cache of a fact the `amountPaid` and [total]
+     * fields already determine, and a cache can disagree with its source - which is
+     * exactly what produced "Paid" beside a visible remaining balance. Reading every
+     * screen from this derivation instead makes the contradiction unreachable even
+     * for a row written by an older build or seeded by hand:
+     *
+     *  - `Paid` requires the balance to be exactly zero. "Fully paid" is the ONLY
+     *    definition of Paid the workbook gives, so a row that claims Paid while
+     *    `amountPaid < total` is corrected here rather than displayed.
+     *  - some money but not all of it -> `Partially Paid`, which is the state that
+     *    legitimately sits in Waiting for Payment;
+     *  - nothing received -> `Unpaid`.
+     *
+     * Deliberately NOT re-derived from the payments table: the amount a customer
+     * paid is snapshotted on the order, and a voided-then-restored row must read
+     * from that snapshot rather than from a list a `voidPayment` may have pruned.
+     */
+    val effectivePaymentStatus: PaymentStatus
+        get() = when {
+            amountPaid <= 0L -> PaymentStatus.UNPAID
+            amountPaid >= total -> PaymentStatus.PAID
+            else -> PaymentStatus.PARTIALLY_PAID
+        }
+
+    /** Patch 2: Paid, as the money says - never as a stale flag claims. */
+    val isFullyPaid: Boolean get() = effectivePaymentStatus == PaymentStatus.PAID
+
+    /**
+     * Patch 2: the amount of money still owed, which Paid must never coexist with.
+     *
+     * This is [balance] with the same arithmetic, named for what it proves: a
+     * `Paid` order has `remainingBalance == 0`, and that equality is the invariant
+     * the tests pin.
+     */
+    val remainingBalance: Long get() = balance
+
+    /**
+     * Patch 2: is this order waiting on the MONEY, rather than on the parcel?
+     *
+     * The stage alone cannot answer that for a held order: a paid-for parcel bought
+     * `Hold For Combined Shipping` sits at [OrderStage.WAITING_PAYMENT] until A-06
+     * combines it, so the stage's own label contradicts the `Paid` badge. This asks
+     * the question the badge is trying to answer - money or fulfilment - and a held
+     * order is never waiting on money it has already received.
+     */
+    val isAwaitingPayment: Boolean
+        get() = paymentStatus != PaymentStatus.PAID &&
+            stage == OrderStage.WAITING_PAYMENT &&
+            remainingBalance > 0L
+
+    /**
+     * Patch 2: the stage label a screen should print, with no contradiction.
+     *
+     * A paid held order reads `Held`; everything else reads its stage. This is the
+     * label [isAwaitingPayment] implies, named once so the owner's list, the order
+     * detail and the customer's list cannot each invent their own.
+     */
+    val stageLabel: String
+        get() = if (isHeld && isPaid) "Held" else stage.label
+
+    /**
      * UAT fix (item 5): whether the shipping screen has anything to show yet.
      *
      * A packed parcel's courier route and waybill are chosen on the shipping
