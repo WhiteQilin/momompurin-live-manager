@@ -362,7 +362,9 @@ private fun RecentOrderRow(order: Order, customerName: String, onClick: () -> Un
                     color = MomoColors.BrandDeep,
                 )
             }
-            StatusBadge(MomoBadges.forStage(order.stage))
+            // Patch 2: the contradiction-free stage label, so the Dashboard's
+            // recent-orders rows agree with the Orders list for a paid hold.
+            StatusBadge(MomoBadges.forOrderStage(order))
         }
     }
 }

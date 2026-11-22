@@ -62,7 +62,29 @@ fun PackingChecklistScreen(
     val data by store.data.collectAsState()
     val order = data.order(orderId)
     val offline by store.offlineMode.collectAsState()
-    val lines = data.linesFor(orderId)
+
+    // Patch 4: a combined shipment is ONE parcel, so its checklist covers every
+    // member's lines and the confirmation packs them together.
+    //
+    // Listing only the tapped order's lines would let the owner tick a checklist
+    // that looks complete while the box still holds an unticked sibling, and the
+    // pack action would then advance one order and leave the other on the packing
+    // table. [OrderOps.shipmentScope] is the same set the ops layer fans the write
+    // out to, so this screen shows exactly what the tap will affect.
+    val scopeIds = remember(data.orders, orderId) { OrderOps.shipmentScope(data, orderId) }
+    val isShipment = scopeIds.size > 1
+    val shipmentOrders = remember(data.orders, scopeIds) {
+        scopeIds.mapNotNull { data.order(it) }
+    }
+    // Every line across the shipment, so the tick state is one set covering the
+    // whole box.
+    val lines = remember(data.orderLines, scopeIds) {
+        scopeIds.flatMap { data.linesFor(it) }
+    }
+    // The per-order slices, for the grouped checklist headings.
+    val linesByOrder = remember(data.orderLines, scopeIds) {
+        scopeIds.map { id -> id to data.linesFor(id) }.filter { it.second.isNotEmpty() }
+    }
 
     var checked by remember { mutableStateOf(setOf<String>()) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -78,14 +100,22 @@ fun PackingChecklistScreen(
     }
 
     val allChecked = lines.isNotEmpty() && lines.all { it.lineId in checked }
-    val alreadyPacked = order.packingStatus ==
-        ph.edu.umak.momompurin.data.entity.PackingStatus.PACKED
+    // Patch 4: the shipment is packed only when EVERY member is. Keying this on the
+    // tapped order alone would hide a half-packed shipment behind a "Packed" pill.
+    val alreadyPacked = shipmentOrders.isNotEmpty() && shipmentOrders.all {
+        it.packingStatus == ph.edu.umak.momompurin.data.entity.PackingStatus.PACKED
+    }
+    // Patch 4: and it may only be packed when every member is PAID - A-07's money
+    // rule is per order, so one member with a balance blocks the whole parcel.
+    val allPaid = shipmentOrders.isNotEmpty() && shipmentOrders.all { it.isFullyPaid }
 
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
         MomoTopBar(
-            title = "Pack order",
+            title = if (isShipment) "Pack shipment" else "Pack order",
             onBack = onBack,
-            contextPill = order.orderId,
+            // Patch 4: the pill names the SHIPMENT for a combined parcel, so the
+            // header does not suggest this tap covers only the order in it.
+            contextPill = order.combinedShipmentNo?.takeIf { isShipment } ?: order.orderId,
         )
 
         Column(
@@ -97,7 +127,18 @@ fun PackingChecklistScreen(
         ) {
             MomoCard {
                 KeyValueRow("Customer", data.customerName(order.customerEmail))
-                KeyValueRow("Total", MomoMoney.format(order.total), emphasise = true)
+                // Patch 4: a combined parcel's total is the sum of its members, which
+                // is the figure the courier and the invoice set both agree on.
+                KeyValueRow(
+                    "Total",
+                    MomoMoney.format(shipmentOrders.sumOf { it.total }),
+                    emphasise = true,
+                )
+                if (isShipment) {
+                    // A-06 c6: the members are named, so every individual order stays
+                    // identifiable from the packing screen that acts on all of them.
+                    KeyValueRow("Combined shipment", scopeIds.joinToString(", "))
+                }
                 KeyValueRow(
                     "Packing",
                     if (alreadyPacked) "Packed" else "Not packed",
@@ -128,7 +169,25 @@ fun PackingChecklistScreen(
                     )
                 }
                 Spacer(Modifier.height(MomoSpace.Sm))
-                lines.forEach { line ->
+                // Patch 4: for a combined shipment the checklist is grouped by the
+                // order each item belongs to, so the owner packing one physical box
+                // can still tell which order needs a given sticker. A single order
+                // renders exactly as before - one group with no heading.
+                linesByOrder.forEachIndexed { groupIndex, (memberId, memberLines) ->
+                    if (isShipment) {
+                        if (groupIndex > 0) {
+                            Spacer(Modifier.height(MomoSpace.Md))
+                            MomoDivider()
+                            Spacer(Modifier.height(MomoSpace.Md))
+                        }
+                        Text(
+                            memberId,
+                            style = MomoType.CaptionBold,
+                            color = MomoColors.BrandDeep,
+                        )
+                        Spacer(Modifier.height(MomoSpace.Xs))
+                    }
+                    memberLines.forEach { line ->
                     val isChecked = line.lineId in checked
                     Row(
                         Modifier
@@ -170,7 +229,10 @@ fun PackingChecklistScreen(
                             color = MomoColors.TextPrimary,
                         )
                     }
-                    if (line != lines.last()) MomoDivider()
+                    // The separator is per GROUP, so the last item of one order's
+                    // slice does not draw a line under a heading that follows it.
+                    if (line != memberLines.last()) MomoDivider()
+                    }
                 }
             }
 
@@ -194,7 +256,7 @@ fun PackingChecklistScreen(
                         showDialog = true
                     }
                 },
-                enabled = !offline && !alreadyPacked && order.isPaid,
+                enabled = !offline && !alreadyPacked && allPaid,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (!allChecked && !alreadyPacked) {
@@ -207,7 +269,10 @@ fun PackingChecklistScreen(
             // UAT fix (item 2): the money rule is stated on the screen, so an owner
             // who reaches a partially-paid order is told what is missing instead of
             // finding a disabled button and no reason.
-            if (!order.isPaid && !alreadyPacked) {
+            //
+            // Patch 4: checked across the whole shipment, because one member owing
+            // money is what disables the button for a combined parcel.
+            if (!allPaid && !alreadyPacked) {
                 Text(
                     OrderOps.NOT_FULLY_PAID_CANNOT_PACK,
                     style = MomoType.CaptionSmall,
@@ -230,18 +295,42 @@ fun PackingChecklistScreen(
     if (showDialog) {
         MomoConfirmDialog(
             title = "Mark as packed",
-            message = "All ${lines.sumOf { it.qty }} items for ${order.orderId} are " +
-                "checked. The order will be marked Packed with today's date and time.",
+            // Patch 4: a shipment's confirmation names the whole parcel, so the
+            // owner is never surprised that one tap advanced two orders.
+            message = if (isShipment) {
+                "All ${lines.sumOf { it.qty }} items across " +
+                    "${shipmentOrders.size} combined orders " +
+                    "(${scopeIds.joinToString(", ")}) are checked. " +
+                    "They will be marked Packed with today's date and time and " +
+                    "move to To Ship together."
+            } else {
+                "All ${lines.sumOf { it.qty }} items for ${order.orderId} are " +
+                    "checked. The order will be marked Packed with today's date and time."
+            },
             confirmLabel = "Mark as packed",
             dismissLabel = "Cancel",
             onConfirm = {
                 showDialog = false
-                when (val result = store.markPacked(orderId, checked)) {
+                // Patch 4: the SHIPMENT-aware write. For an uncombined order the
+                // scope is that order alone, so this is the same call it was.
+                when (val result = store.markShipmentPacked(orderId, checked)) {
                     is OrderOps.PackResult.Packed -> {
                         // UAT fix (item 5): name the stage the order just moved to,
                         // so "packed" and the order leaving this queue are one
                         // piece of news rather than two surprises.
-                        notice = "Order marked as packed and moved to To Ship."
+                        //
+                        // Patch 5: through the snackbar. Packing REMOVES this screen's
+                        // whole reason to exist (the order leaves To Ship and the
+                        // control goes with it), so an inline line landed in a layout
+                        // that had just been rebuilt underneath the owner.
+                        notice = null
+                        ph.edu.umak.momompurin.ui.components.MomoMessages.show(
+                            if (isShipment) {
+                                "Combined shipment marked as packed and moved to To Ship."
+                            } else {
+                                "Order marked as packed and moved to To Ship."
+                            },
+                        )
                         isError = false
                     }
                     is OrderOps.PackResult.Refused -> {
@@ -516,8 +605,20 @@ private fun save(
     // unconditionally, so "Enter the tracking number first." and the offline
     // refusal both rendered in SUCCESS green - a refusal that reads as a
     // confirmation is worse than no message at all.
-    when (val result = store.updateShipping(orderId, courier, tracking, status)) {
-        is OrderOps.ShipResult.Updated -> onMessage("Shipping details saved.", false)
+    //
+    // Patch 4: the SHIPMENT-aware write, so a courier and waybill recorded here for
+    // a member of a combined parcel land on all of them and each member's stock is
+    // deducted exactly once. For an uncombined order the scope is that order alone.
+    when (val result = store.updateShipmentShipping(orderId, courier, tracking, status)) {
+        is OrderOps.ShipResult.Updated -> {
+            // Patch 5: the SNACKBAR, not the caller's inline notice. Every call site
+            // of this helper used to render the confirmation inside this screen's
+            // scrolling form, which is the pattern the report asks to remove - so the
+            // success is raised here, once, and the callers no longer have to carry a
+            // `(String, Boolean)` recovery path for it.
+            ph.edu.umak.momompurin.ui.components.MomoMessages.show("Shipping details saved.")
+            onMessage("", false)
+        }
         is OrderOps.ShipResult.Refused -> onMessage(result.message, true)
     }
 }

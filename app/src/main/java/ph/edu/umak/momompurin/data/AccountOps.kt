@@ -61,6 +61,39 @@ object AccountOps {
     fun isEmail(value: String): Boolean = EMAIL.matches(value.trim())
 
     /**
+     * Patch 1: the ONE canonical form of an email address.
+     *
+     * A-11 c5 says the email already belongs to an account, without qualifying
+     * *which spelling*. "Mika.Tan@Example.com", "mika.tan@example.com " and
+     * "MIKA.TAN@EXAMPLE.COM" are the same mailbox, so they must be the same
+     * identity - otherwise a customer registers a second account on an address
+     * that receives their invoices, and the uniqueness rule the criterion states
+     * is true only of the exact bytes typed.
+     *
+     * Applied on BOTH sides of every comparison: [register] writes this form, and
+     * [MomoData.account] / [duplicateEmail] look up this form. Two spellings can
+     * therefore never diverge into two accounts.
+     */
+    fun normaliseEmail(value: String): String = value.trim().lowercase()
+
+    /**
+     * Patch 1: is this address already taken, in any spelling?
+     *
+     * Exposed so the Registration screen can warn WHILE THE OWNER OF THE ADDRESS
+     * TYPES rather than only when they tap Create account - and so the screen and
+     * [register] answer from one rule instead of two that could drift.
+     *
+     * A blank or malformed address is never "taken": the format check owns that
+     * answer, and reporting "already exists" over "elena@" would send the customer
+     * looking for an account that was never created.
+     */
+    fun duplicateEmail(data: MomoData, email: String): Boolean {
+        if (email.isBlank() || !isEmail(email)) return false
+        val wanted = normaliseEmail(email)
+        return data.accounts.any { normaliseEmail(it.email) == wanted }
+    }
+
+    /**
      * A-11 c4: 11 digits. Spaces and dashes are stripped first, because a customer
      * typing "0917 555 0101" has given a correct 11-digit number and rejecting it
      * would be a false failure.
@@ -142,7 +175,20 @@ object AccountOps {
         }
         if (!isEmail(form.email)) return RegisterResult.Failure(INVALID_EMAIL)
         if (!isMobile(form.mobile)) return RegisterResult.Failure(INVALID_MOBILE)
-        if (data.account(form.email) != null) return RegisterResult.Failure(DUPLICATE_EMAIL)
+        // A-11 c5 / Patch 1: the uniqueness check is CASE-INSENSITIVE and TRIMMED.
+        //
+        // The old line read `data.account(form.email) != null`, which delegates to
+        // an `equals(..., ignoreCase = true)` lookup - so case was already handled,
+        // and the real bypass was the other half: the comparison ran on the RAW
+        // typed string, and this method stored `form.email.trim().lowercase()`. A
+        // typed "  Mika.Tan@Example.com" therefore compared a string with leading
+        // spaces that matched nothing, and was then written in its normalised form
+        // - producing a SECOND row whose email was byte-identical to an existing
+        // one. Both spellings then resolved to whichever row `account()` found
+        // first, so a password reset or a profile edit could land on the wrong
+        // account. The shared [normaliseEmail] closes that: the check and the write
+        // now compare and store the SAME canonical form.
+        if (duplicateEmail(data, form.email)) return RegisterResult.Failure(DUPLICATE_EMAIL)
         if (form.password.length < MIN_PASSWORD_LENGTH) {
             return RegisterResult.Failure(SHORT_PASSWORD)
         }
@@ -151,7 +197,7 @@ object AccountOps {
         // only ever produce a Customer.
         return RegisterResult.Success(
             Account(
-                email = form.email.trim().lowercase(),
+                email = normaliseEmail(form.email),
                 role = Role.CUSTOMER,
                 passwordDigest = digest(form.password),
                 name = form.fullName.trim(),

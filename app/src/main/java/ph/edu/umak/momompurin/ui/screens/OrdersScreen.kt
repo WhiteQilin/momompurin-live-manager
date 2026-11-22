@@ -35,17 +35,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ph.edu.umak.momompurin.data.MomoData
 import ph.edu.umak.momompurin.data.MomoStore
 import ph.edu.umak.momompurin.data.OrderOps
 import ph.edu.umak.momompurin.data.entity.CancelledBy
 import ph.edu.umak.momompurin.data.entity.Order
 import ph.edu.umak.momompurin.data.entity.OrderStage
+import ph.edu.umak.momompurin.data.entity.PaymentStatus
 import ph.edu.umak.momompurin.data.entity.ShippingStatus
+import ph.edu.umak.momompurin.ui.components.BadgeSpec
 import ph.edu.umak.momompurin.ui.components.KeyValueRow
 import ph.edu.umak.momompurin.ui.components.MiniAction
 import ph.edu.umak.momompurin.ui.components.MomoBadges
 import ph.edu.umak.momompurin.ui.components.MomoButton
 import ph.edu.umak.momompurin.ui.components.MomoCard
+import ph.edu.umak.momompurin.ui.components.MomoMessages
 import ph.edu.umak.momompurin.ui.components.MomoConfirmDialog
 import ph.edu.umak.momompurin.ui.components.MomoDivider
 import ph.edu.umak.momompurin.ui.components.MomoField
@@ -91,8 +95,17 @@ fun OrdersScreen(
     var heldOnly by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
 
-    val results = remember(data.orders, data.products, stage, special, heldOnly, query) {
-        data.searchOrders(query).filter { order ->
+    // Patch 4: the list is built from ORDER ROWS, not raw orders, so 2+ orders
+    // sharing a `combinedShipmentNo` render as one combined-shipment card.
+    //
+    // The grouping runs INSIDE the filter, after it, rather than before: filtering
+    // is per ORDER (a tab is a stage, and a shipment's members could in principle
+    // straddle one), while the grouping is per PARCEL. Doing it in this order means
+    // a row appears in a tab when any of its orders belongs there, and the whole
+    // shipment is shown - which is the honest presentation, because the box is one
+    // object even if its paperwork is several.
+    val rows = remember(data.orders, data.products, stage, special, heldOnly, query) {
+        val matched = data.searchOrders(query).filter { order ->
             when {
                 // A-02 c2: "Unpaid or overdue" is the Dashboard predicate, not a
                 // stage - it spans Waiting for Payment and To Pack alike.
@@ -105,6 +118,17 @@ fun OrdersScreen(
                 // so the chip's count and the Hold screen's list cannot disagree.
                 heldOnly -> order.isHeld && order.isPaid &&
                     order.stage != OrderStage.CANCELLED
+                // Patch 2: a paid held order is NOT waiting for payment.
+                //
+                // Its stage is Waiting for Payment until the parcel is combined, but
+                // the money has arrived, so listing it here would put an order with
+                // a cleared balance in the queue of orders that still owe money -
+                // and print "Waiting for Payment" on it, the contradiction the bug
+                // report names. [Order.isAwaitingPayment] is the money question, and
+                // it answers false for a paid hold.
+                stage == OrderStage.WAITING_PAYMENT ->
+                    order.stage == OrderStage.WAITING_PAYMENT &&
+                        order.isAwaitingPayment
                 // The "To Pack" tab excludes held orders so it agrees with A-02's
                 // tile: a held order waits for A-06's Combine, not for the packing
                 // table.
@@ -113,6 +137,10 @@ fun OrdersScreen(
                 else -> stage == null || order.stage == stage
             }
         }
+        // Patch 4: group the matches back into shipment rows, using the ONE
+        // grouping implementation the data layer owns - so the list and any test
+        // that pins the grouping cannot describe two different shapes.
+        data.orderRows(matched)
     }
 
     /** Leaving the Dashboard tile's special predicate by tapping any chip. */
@@ -201,7 +229,7 @@ fun OrdersScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(MomoSpace.Md),
         ) {
-            if (results.isEmpty()) {
+            if (rows.isEmpty()) {
                 // A-04 c3's zero-match state, e.g. searching "zzz".
                 item {
                     Text(
@@ -217,7 +245,11 @@ fun OrdersScreen(
             // shows the owner the queue, but the ACTION for that queue lives on
             // another screen - so the banner carries the owner there instead of
             // leaving them to find More > Hold and combine orders themselves.
-            if (heldOnly && results.isNotEmpty()) {
+            if (heldOnly && rows.isNotEmpty()) {
+                // The banner counts ORDERS, not rows: a combined shipment of two is
+                // still two held orders the owner has to deal with, and a count of
+                // "1 order" over a pair would understate the work.
+                val heldCount = rows.sumOf { it.orders.size }
                 item {
                     MomoCard(Modifier.clickable(onClick = onOpenHeld)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -228,8 +260,8 @@ fun OrdersScreen(
                                     color = MomoColors.BrandDeep,
                                 )
                                 Text(
-                                    "${results.size} paid " +
-                                        (if (results.size == 1) "order" else "orders") +
+                                    "$heldCount paid " +
+                                        (if (heldCount == 1) "order" else "orders") +
                                         " waiting to be combined.",
                                     style = MomoType.CaptionSmall,
                                     color = MomoColors.TextSecondary,
@@ -244,13 +276,28 @@ fun OrdersScreen(
                     }
                 }
             }
-            items(results, key = { it.orderId }) { order ->
-                OwnerOrderRow(
-                    order = order,
-                    customerName = data.customerName(order.customerEmail),
-                    overdue = order.isOverdue(store.now),
-                    onClick = { onOpenOrder(order.orderId) },
-                )
+            items(rows, key = { row -> row.orders.joinToString("+") { it.orderId } }) { row ->
+                if (row.isCombined) {
+                    // Patch 4: one parcel, one card.
+                    CombinedShipmentCard(
+                        row = row,
+                        customerName = data.customerName(row.customerEmail()),
+                        overdue = row.orders.any { it.isOverdue(store.now) },
+                        // Tapping opens the shipment's first member. Each individual
+                        // order and invoice stays reachable from the detail screen,
+                        // which is what A-06 c6 requires - the grouping is about the
+                        // LIST, never about hiding an order.
+                        onClick = { onOpenOrder(row.orders.first().orderId) },
+                    )
+                } else {
+                    val order = row.orders.first()
+                    OwnerOrderRow(
+                        order = order,
+                        customerName = data.customerName(order.customerEmail),
+                        overdue = order.isOverdue(store.now),
+                        onClick = { onOpenOrder(order.orderId) },
+                    )
+                }
             }
         }
     }
@@ -296,6 +343,110 @@ fun StageChip(label: String, selected: Boolean, onClick: () -> Unit) {    Box(
     }
 }
 
+/**
+ * Patch 4: one combined shipment, as one card.
+ *
+ * ## The shape
+ *
+ * ```
+ * CS-0001 · Mika Tan                          ₱760.00
+ * [Paid] [To Pack] [2 orders]
+ * ORD-1037, ORD-1036
+ * ```
+ *
+ * The header names the SHIPMENT and its customer; the combined total is the sum of
+ * every member's own total, so it agrees with the two invoices it stands for. The
+ * count badge is what makes the card's multiplicity explicit rather than leaving
+ * the reader to infer it from the id list.
+ *
+ * ## What is deliberately NOT here
+ *
+ * The card carries no per-order money breakdown. A-06 c6 requires the individual
+ * orders and their invoices to stay inspectable, and they do - each is one tap away
+ * on the detail screen - but putting two sets of totals on a list card would make
+ * the LIST harder to scan for the thing the owner is looking for (which parcel, for
+ * whom, what state). The list groups; the detail itemizes.
+ *
+ * Badges use the same derived pair as a single-order row, so a shipment whose
+ * members are all paid reads `Paid` and never `Partially Paid`, and the stage
+ * badge is the members' SHARED stage - a shipment whose members disagree falls back
+ * to [MomoBadges.forStage] of the first, because a half-advanced shipment is a data
+ * state the pack/ship fan-out exists to prevent, not one this card should dress up.
+ */
+@Composable
+private fun CombinedShipmentCard(
+    row: MomoData.OrderRow,
+    customerName: String,
+    overdue: Boolean,
+    onClick: () -> Unit,
+) {
+    MomoCard(Modifier.clickable(onClick = onClick)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${row.shipmentNo ?: "Combined"} \u00B7 $customerName",
+                    style = MomoType.BodyDefault,
+                    color = MomoColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Patch 4: the member ids, in the order the card lists them. A-06
+                // c2's example is exactly this pair, so the two identifiers the
+                // owner knows are on the card they are looking at.
+                Text(
+                    row.orderIds.joinToString(", "),
+                    style = MomoType.CaptionSmall,
+                    color = MomoColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                MomoMoney.format(row.total),
+                style = MomoType.DataMonospace,
+                color = MomoColors.BrandDeep,
+            )
+        }
+        Spacer(Modifier.height(MomoSpace.Sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Xs)) {
+            // The shipment is paid only when every member is, which is what
+            // [OrderRow.isFullyPaid] answers - a combined parcel is paid for as one
+            // box, so a member still owing money keeps the whole card off `Paid`.
+            StatusBadge(
+                if (row.isFullyPaid) {
+                    MomoBadges.forPayment(PaymentStatus.PAID, overdue)
+                } else {
+                    MomoBadges.forPayment(
+                        row.sharedPayment ?: PaymentStatus.PARTIALLY_PAID,
+                        overdue,
+                    )
+                },
+            )
+            // The shared stage, or the first member's when they disagree. `Held`
+            // still applies for a shipment that has not been combined away yet.
+            val stageOrder = row.orders.first()
+            val shared = row.sharedStage
+            StatusBadge(
+                if (shared != null) {
+                    MomoBadges.forOrderStage(stageOrder.copy(stage = shared))
+                } else {
+                    MomoBadges.forOrderStage(stageOrder)
+                },
+            )
+            // The explicit count: "2 orders" is what tells the owner this card is a
+            // parcel of two rather than one order with a long id.
+            StatusBadge(
+                BadgeSpec(
+                    label = "${row.orders.size} orders",
+                    width = 74.dp,
+                    fill = MomoColors.SurfaceMutedVariant,
+                    ink = MomoColors.TextSecondary,
+                ),
+            )
+        }
+    }
+}
+
 @Composable
 private fun OwnerOrderRow(
     order: Order,
@@ -327,9 +478,15 @@ private fun OwnerOrderRow(
         }
         Spacer(Modifier.height(MomoSpace.Sm))
         // A-04 c4: the two tracks, side by side and never merged.
+        //
+        // Patch 2: the payment badge reads [Order.effectivePaymentStatus], the
+        // status the MONEY implies, so a row carrying a stale `Paid` flag beside a
+        // non-zero balance renders `Partially Paid` rather than contradicting
+        // itself. The stage badge reads `MomoBadges.forOrderStage`, which prints
+        // `Held` for a paid hold instead of echoing its `Waiting for Payment` stage.
         Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Xs)) {
-            StatusBadge(MomoBadges.forPayment(order.paymentStatus, overdue))
-            StatusBadge(MomoBadges.forStage(order.stage))
+            StatusBadge(MomoBadges.forPayment(order.effectivePaymentStatus, overdue))
+            StatusBadge(MomoBadges.forOrderStage(order))
             if (order.combinedShipmentNo != null) {
                 StatusBadge(
                     ph.edu.umak.momompurin.ui.components.BadgeSpec(
@@ -406,7 +563,12 @@ fun OrderDetailScreen(
 
     val overdue = order.isOverdue(store.now)
     // A-05 c6: Paid locks editing. A-04 c8: Paid blocks cancelling.
-    val locked = order.isPaid
+    //
+    // Patch 2: "Paid" here is the MONEY's answer, not the stored flag's. The lock
+    // is a promise that nothing more is owed, and a row whose balance is still
+    // positive has not earned it - `isFullyPaid` is that check, so a stale `Paid`
+    // cannot lock an order that still owes money.
+    val locked = order.isFullyPaid
     val canSendInvoice = order.stage == OrderStage.ORDER_PLACED && !offline
     val canCancel = !locked && order.packingStatus !=
         ph.edu.umak.momompurin.data.entity.PackingStatus.PACKED &&
@@ -426,7 +588,11 @@ fun OrderDetailScreen(
         val result = store.editOrderQuantities(orderId, draftQty)
         when (result) {
             is OrderOps.EditResult.Applied -> {
-                notice = "Order changes saved."
+                // Patch 5: the snackbar. The Save control lives in the header, so an
+                // inline line at the bottom of a long order was nowhere near the tap
+                // that caused it.
+                notice = null
+                MomoMessages.show("Order changes saved.")
                 isError = false
                 editing = false
             }
@@ -447,9 +613,13 @@ fun OrderDetailScreen(
             // the same frame as the badges below - the old pill froze at the stage
             // the screen was opened with.
             contextPill = when {
-                order.isPaid -> "Paid \u00B7 locked"
+                locked -> "Paid \u00B7 locked"
                 order.stage == OrderStage.CANCELLED -> "Cancelled"
-                else -> order.stage.label
+                // Patch 2: a paid held order reads `Held` here too. Without this the
+                // pill echoed the raw stage and printed "Waiting for Payment" above a
+                // card whose badges said Paid - the contradiction living in the
+                // header while the list below had been fixed.
+                else -> order.stageLabel
             },
             actions = {
                 // UAT fix (item 6): the explicit Save changes lives in the header,
@@ -523,8 +693,12 @@ fun OrderDetailScreen(
                 }
                 Spacer(Modifier.height(MomoSpace.Sm))
                 Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Xs)) {
-                    StatusBadge(MomoBadges.forPayment(order.paymentStatus, overdue))
-                    StatusBadge(MomoBadges.forStage(order.stage))
+                    // Patch 2: both badges read the DERIVED payment status and the
+                    // contradiction-free stage label, the same pair the list card
+                    // prints - so opening an order cannot show a different status
+                    // than the row that was tapped.
+                    StatusBadge(MomoBadges.forPayment(order.effectivePaymentStatus, overdue))
+                    StatusBadge(MomoBadges.forOrderStage(order))
                     MomoBadges.forPacking(order.packingStatus)?.let { StatusBadge(it) }
                     MomoBadges.forShipping(order.shippingStatus)?.let { StatusBadge(it) }
                 }
@@ -544,6 +718,11 @@ fun OrderDetailScreen(
                 // below the Items card, which is where the tester had to scroll to
                 // find it.
                 val feeValid = shippingFee.isBlank() || OrderOps.parseFee(shippingFee) != null
+                // Patch 3 (A-03): a held order carries no freight of its own, so the
+                // input is disabled and pinned at P0.00 until the parcel is combined
+                // or cleared for shipping. `OrderOps.sendInvoice` enforces the same
+                // rule, so this is the affordance rather than the only guard.
+                val feeLocked = OrderOps.shippingFeeLocked(order)
                 MomoCard {
                     Text(
                         "Send the invoice",
@@ -558,11 +737,24 @@ fun OrderDetailScreen(
                         labelOutside = true,
                         // "0.00" is the hint, not the value (v2.3 HCI audit F-04).
                         placeholder = "0.00",
-                        supporting = "Leave 0.00 for a held order",
+                        // Patch 3: the locked state explains itself in the helper
+                        // text rather than leaving a greyed field with no reason.
+                        supporting = if (feeLocked) {
+                            OrderOps.HELD_SHIPPING_FEE_LOCKED
+                        } else {
+                            "Leave 0.00 for a held order"
+                        },
                         // A.1: a decimal keyboard so a fee cannot even be typed with
                         // letters on the soft keyboard (a paste can still, which is
                         // what the inline validation catches).
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
+                        // Patch 3: a held order's freight is decided by the combined
+                        // shipment, not here, so the control is READ-ONLY. `readOnly`
+                        // rather than `enabled = false` because a disabled Material
+                        // field drops its text to a disabled ink that fails contrast
+                        // on this surface, while a read-only one keeps P0.00 legible
+                        // as the value it now holds.
+                        readOnly = feeLocked,
                         error = if (!feeValid) OrderOps.INVALID_SHIPPING_FEE else null,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -638,6 +830,36 @@ fun OrderDetailScreen(
             }
 
             // A-07: the packing and shipping entries.
+            //
+            // Patch 4: when this order belongs to a combined shipment, the card
+            // states the shipment and lists its members BEFORE the actions, so the
+            // owner knows the pack/ship tap covers the whole parcel rather than just
+            // the order whose id is in the title.
+            val shipmentNo = order.combinedShipmentNo
+            val shipmentMembers = shipmentNo?.let { data.shipmentMembers(it) }.orEmpty()
+            val inShipment = shipmentMembers.size >= 2
+            if (inShipment && shipmentNo != null) {
+                MomoCard {
+                    Text(
+                        shipmentNo,
+                        style = MomoType.DataMonospace,
+                        color = MomoColors.TextPrimary,
+                    )
+                    Text(
+                        "Combined shipment of ${shipmentMembers.size} orders: " +
+                            shipmentMembers.joinToString(", ") { it.orderId },
+                        style = MomoType.CaptionSmall,
+                        color = MomoColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(MomoSpace.Xs))
+                    Text(
+                        "Packing and shipping apply to every order in this shipment.",
+                        style = MomoType.CaptionSmall,
+                        color = MomoColors.InfoText,
+                    )
+                }
+            }
+
             if (order.stage == OrderStage.TO_PACK) {
                 MomoCard {
                     Text("Packing and shipping",
@@ -645,7 +867,7 @@ fun OrderDetailScreen(
                     Spacer(Modifier.height(MomoSpace.Sm))
                     Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm)) {
                         MiniAction(
-                            label = "Pack order",
+                            label = if (inShipment) "Pack shipment" else "Pack order",
                             onClick = { onOpenPack(orderId) },
                             enabled = !offline,
                         )
@@ -866,21 +1088,37 @@ fun OrderDetailScreen(
     if (showInvoiceDialog) {
         MomoConfirmDialog(
             title = "Confirm & Send Invoice",
-            message = "Invoice MP-${orderId.removePrefix("ORD-")} will be sent to " +
-                "${data.customerName(order.customerEmail)} and the 24-hour payment " +
-                "window will start.",
+            // Patch 3: a held order's confirmation states the P0.00 freight, so the
+            // owner is not surprised by a total with no shipping on it after having
+            // left a field that could not be edited.
+            message = if (OrderOps.shippingFeeLocked(order)) {
+                "Invoice MP-${orderId.removePrefix("ORD-")} will be sent to " +
+                    "${data.customerName(order.customerEmail)} with P0.00 shipping, " +
+                    "because this order is held for combined shipping. The 24-hour " +
+                    "payment window will start."
+            } else {
+                "Invoice MP-${orderId.removePrefix("ORD-")} will be sent to " +
+                    "${data.customerName(order.customerEmail)} and the 24-hour payment " +
+                    "window will start."
+            },
             confirmLabel = "Send invoice",
             dismissLabel = "Cancel",
             onConfirm = {
                 showInvoiceDialog = false
                 when (val result = store.sendInvoice(orderId, shippingFee)) {
                     is OrderOps.InvoiceResult.Sent -> {
-                        notice = "Invoice ${result.invoiceNo} sent."
+                        // Patch 5: the snackbar. Sending the invoice REPLACES the whole
+                        // "Send the invoice" card (the order leaves Order Placed), so
+                        // an inline confirmation rendered in a spot that had just been
+                        // removed from the layout.
+                        notice = null
+                        MomoMessages.show("Invoice ${result.invoiceNo} sent.")
                         isError = false
                     }
                     is OrderOps.InvoiceResult.Refused -> {
                         notice = result.message
-                        isError = result.message == OrderOps.INVALID_SHIPPING_FEE
+                        isError = result.message == OrderOps.INVALID_SHIPPING_FEE ||
+                            result.message == OrderOps.HELD_SHIPPING_FEE_LOCKED
                     }
                 }
             },
@@ -1002,9 +1240,21 @@ private fun ShippingDetailsCard(
     var isError by remember(order.orderId) { mutableStateOf(false) }
 
     fun apply(courier: String?, tracking: String?, status: ShippingStatus?) {
-        when (val result = store.updateShipping(order.orderId, courier, tracking, status)) {
+        // Patch 4: routed through the SHIPMENT-aware write, so a courier and waybill
+        // recorded on one member of a combined parcel land on all of them and each
+        // member's stock is deducted exactly once. For an uncombined order the scope
+        // is that order alone, so this is the same call it always was.
+        when (
+            val result = store.updateShipmentShipping(
+                order.orderId, courier, tracking, status,
+            )
+        ) {
             is OrderOps.ShipResult.Updated -> {
-                notice = "Shipping details saved."
+                // Patch 5: the snackbar, matching the packing screen's own shipping
+                // confirmation - the same save reported in two places must not use
+                // two different controls.
+                notice = null
+                MomoMessages.show("Shipping details saved.")
                 isError = false
             }
             is OrderOps.ShipResult.Refused -> {

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import ph.edu.umak.momompurin.data.entity.Order
 import ph.edu.umak.momompurin.data.entity.OrderStage
 import ph.edu.umak.momompurin.data.entity.PackingStatus
 import ph.edu.umak.momompurin.data.entity.PaymentStatus
@@ -97,6 +98,38 @@ object MomoBadges {
         OrderStage.CANCELLED ->
             BadgeSpec("Cancelled", 78.dp, MomoColors.DangerSurface, MomoColors.DangerText)
     }
+
+    /**
+     * Patch 2: the stage badge for a real order, which can read `Held`.
+     *
+     * ## The contradiction this closes
+     *
+     * A held order that has been paid for is waiting on A-06's Combine, NOT on the
+     * money - but its lifecycle stage is still [OrderStage.WAITING_PAYMENT] until
+     * the owner packs it. Rendering the stage's own label therefore drew "Paid" and
+     * "Waiting for Payment" on the same card, which is the exact pair the bug report
+     * shows on ORD-1053: two badges disagreeing about whether the money arrived.
+     *
+     * The fix is a PRESENTATION rule, not a new stage:
+     *
+     *  - a HELD order (bought `Hold For Combined Shipping`, not yet combined) shows
+     *    **Held**, because that is the queue it is actually waiting in;
+     *  - everything else keeps its stage label.
+     *
+     * It is keyed on [Order.isHeld] rather than on the stage so that it holds in
+     * every tab the order appears in (All, Held, To Pack) and on the detail screen -
+     * there is one function, so there is one answer.
+     *
+     * A held order that has NOT been paid keeps its stage label: it is genuinely
+     * waiting for money, it is genuinely in `Waiting for Payment`, and `Held` would
+     * misreport why it has not shipped.
+     */
+    fun forOrderStage(order: Order): BadgeSpec =
+        if (order.isHeld && order.isPaid) forHeld() else forStage(order.stage)
+
+    /** Patch 2: the stage badge a paid, held order reads instead of its stage. */
+    fun forHeld(): BadgeSpec =
+        BadgeSpec("Held", 56.dp, MomoColors.InfoSurface, MomoColors.InfoText)
 
     // ------------------------------------------- A-07 c4: the packing ---------
     fun forPacking(status: PackingStatus): BadgeSpec? = when (status) {

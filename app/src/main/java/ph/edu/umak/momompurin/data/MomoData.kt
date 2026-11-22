@@ -230,6 +230,116 @@ data class MomoData(
     fun ordersInStage(stage: OrderStage?): List<Order> =
         ordersNewestFirst().filter { stage == null || it.stage == stage }
 
+    // ------------------------------------------------- A-06 combined rows ----
+
+    /**
+     * Patch 4: one row of the owner's Orders list.
+     *
+     * A combined shipment is ONE parcel, so it is ONE row - but each member order
+     * and its invoice must stay individually inspectable (A-06 c6). This type
+     * carries both facts: [orders] is the group, and a single-order row is simply
+     * a group of one. The screen decides how to render each shape; nothing here
+     * hides an order, it only decides how they are stacked.
+     */
+    data class OrderRow(
+        /** Members of this row, newest first. A single order is a list of one. */
+        val orders: List<Order>,
+    ) {
+        /** The shipment number, present only when this row combines 2+ orders. */
+        val shipmentNo: String?
+            get() = orders.firstOrNull()?.combinedShipmentNo
+                ?.takeIf { isCombined }
+
+        /** True when this row is a combined shipment of two or more orders. */
+        val isCombined: Boolean get() = orders.size > 1
+
+        /** The row's money: the combined shipment's total, or the single order's. */
+        val total: Long get() = orders.sumOf { it.total }
+
+        fun customerEmail(): String = orders.first().customerEmail
+
+        /** Patch 4: the member order ids, for the card's sub-line. */
+        val orderIds: List<String> get() = orders.map { it.orderId }
+
+        /** Patch 4: the stage every member shares, or null when they disagree. */
+        val sharedStage: OrderStage? get() = orders.map { it.stage }.distinct().singleOrNull()
+
+        /** Patch 4: the payment status every member shares, or null when they disagree. */
+        val sharedPayment: PaymentStatus?
+            get() = orders.map { it.effectivePaymentStatus }.distinct().singleOrNull()
+
+        /**
+         * Patch 4: the row is fully paid when EVERY member is.
+         *
+         * A combined shipment is handed to a courier as one parcel, so it is paid
+         * for as one - "Paid" on the card means nothing in it still owes money.
+         */
+        val isFullyPaid: Boolean get() = orders.all { it.isFullyPaid }
+    }
+
+    /**
+     * Patch 4: fold the given orders into list rows, one per combined shipment.
+     *
+     * Orders sharing a non-null [Order.combinedShipmentNo] collapse into ONE row
+     * (A-06 c3: a combined shipment is a single parcel). Everything else stays a
+     * row of its own, in the input order.
+     *
+     * The rows are ordered by the NEWEST member, so a combined shipment sorts
+     * exactly where its most recent order would have - the list does not jump when
+     * two orders are combined.
+     *
+     * A shipment number attached to a SINGLE order is deliberately NOT treated as a
+     * combined row: `combine` always writes two or more, so a lone one means an
+     * order was cancelled out of a shipment, and rendering it as "1 order" inside a
+     * shipment card would describe a parcel that no longer exists.
+     */
+    fun orderRows(source: List<Order>): List<OrderRow> {
+        val byShipment = source
+            .filter { it.combinedShipmentNo != null }
+            .groupBy { it.combinedShipmentNo!! }
+        // Only 2+ member shipments collapse; a lone tagged order falls through to
+        // the per-order branch below.
+        val combined = byShipment.filterValues { it.size >= 2 }
+
+        val rows = mutableListOf<OrderRow>()
+        // The members already folded into a row they emitted.
+        val emitted = mutableSetOf<String>()
+        for (order in source) {
+            if (order.orderId in emitted) continue
+            val shipment = order.combinedShipmentNo
+            val members = shipment?.let { combined[it] }
+            if (members != null) {
+                // Emit the shipment ONCE, at the position of its first member
+                // encountered, and mark every member as accounted for.
+                rows += OrderRow(members.sortedByDescending { it.placedAt })
+                emitted += members.map { it.orderId }
+            } else {
+                rows += OrderRow(listOf(order))
+                emitted += order.orderId
+            }
+        }
+        // Newest member first - a combined row sits where its latest order was.
+        return rows.sortedByDescending { row -> row.orders.maxOf { it.placedAt } }
+    }
+
+    /** Patch 4: the same grouping applied to the newest-first owner list. */
+    fun orderRowsNewestFirst(): List<OrderRow> = orderRows(ordersNewestFirst())
+
+    /**
+     * Patch 4: the member orders of one combined shipment, in a stable order.
+     *
+     * The pack/ship actions apply to this whole list, which is what keeps a
+     * combined parcel synchronized: the owner cannot mark one of its orders
+     * dispatched while the other still sits on the packing table.
+     */
+    fun shipmentMembers(shipmentNo: String): List<Order> =
+        orders.filter { it.combinedShipmentNo == shipmentNo }
+            .sortedByDescending { it.placedAt }
+
+    /** Patch 4: a combined shipment's money, summed across its member orders. */
+    fun shipmentTotal(shipmentNo: String): Long =
+        shipmentMembers(shipmentNo).sumOf { it.total }
+
     /**
      * A-02 c2's four tiles.
      *
