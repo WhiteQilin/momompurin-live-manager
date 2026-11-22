@@ -76,12 +76,12 @@ fun ManageCustomersScreen(
                 top = MomoSpace.TopContentGap,
             ),
         ) {
-            MomoField(
+            // UAT fix (item 11): the magnifier-led search field, shared across
+            // the four list screens.
+            ph.edu.umak.momompurin.ui.components.MomoSearchField(
                 value = query,
                 onValueChange = { query = it },
                 label = "Search name or email",
-                labelOutside = true,
-                modifier = Modifier.fillMaxWidth(),
             )
         }
 

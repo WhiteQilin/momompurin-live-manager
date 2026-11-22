@@ -215,7 +215,9 @@ fun CheckoutScreen(
             MomoField(
                 value = addressLine,
                 onValueChange = { addressLine = it; error = null },
-                label = "Full address",
+                // UAT fix (item 10): matches the label Registration and Edit
+                // account now use, for the street-level part of the address.
+                label = "Street Name, Building, House No.",
                 labelOutside = true,
                 modifier = Modifier.fillMaxWidth(),
             )

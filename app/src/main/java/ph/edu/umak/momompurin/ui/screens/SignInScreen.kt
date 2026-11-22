@@ -67,6 +67,8 @@ fun SignInScreen(
     store: MomoStore,
     onSignedIn: () -> Unit,
     onCreateAccount: () -> Unit,
+    /** UAT fix (item 13): the customer-only password recovery entry point. */
+    onForgotPassword: () -> Unit = {},
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -194,6 +196,15 @@ fun SignInScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // UAT fix (item 13): the recovery link sits directly under Password,
+        // where a user who has just failed to sign in is already looking.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            LinkText(label = "Forgot password?", onClick = onForgotPassword)
+        }
 
         if (error != null) {
             Spacer(Modifier.height(MomoSpace.Sm))

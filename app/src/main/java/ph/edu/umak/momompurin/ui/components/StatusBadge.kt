@@ -65,6 +65,18 @@ object MomoBadges {
         else -> BadgeSpec("Paid", 47.dp, MomoColors.SuccessSurface, MomoColors.SuccessText)
     }
 
+    // --------------------- UAT fix (item 8): awaiting the seller's approval -----
+    /**
+     * UAT fix (item 8): the badge a CUSTOMER sees before the invoice exists.
+     *
+     * The customer's order detail used to show `Order Placed` and an active
+     * `View invoice` control, which invited a tap on a document that had not been
+     * written yet. The approval badge is the customer-facing name for that same
+     * stage, and it says what is happening rather than naming the seller's queue.
+     */
+    fun forApproval(): BadgeSpec =
+        BadgeSpec("Waiting for Seller's Approval", 196.dp, MomoColors.InfoSurface, MomoColors.InfoText)
+
     // ---------------------------------------------- A-04 c3: the stage --------
     fun forStage(stage: OrderStage): BadgeSpec = when (stage) {
         OrderStage.ORDER_PLACED ->
@@ -73,6 +85,11 @@ object MomoBadges {
             BadgeSpec("Waiting for Payment", 121.dp, MomoColors.InfoSurface, MomoColors.InfoText)
         OrderStage.TO_PACK ->
             BadgeSpec("To Pack", 64.dp, MomoColors.WarningSurface, MomoColors.WarningText)
+        // UAT fix (item 5): a packed parcel is no longer packing work. It shares
+        // the To Pack family's warning colour because it is still pre-dispatch
+        // work the owner owes someone, not a state the customer can act on.
+        OrderStage.TO_SHIP ->
+            BadgeSpec("To Ship", 64.dp, MomoColors.WarningSurface, MomoColors.WarningText)
         OrderStage.SHIPPED ->
             BadgeSpec("Shipped", 70.dp, MomoColors.InfoSurface, MomoColors.InfoText)
         OrderStage.COMPLETED ->
@@ -126,6 +143,7 @@ object StatePill {
         OrderStage.ORDER_PLACED -> "ORDER PLACED"
         OrderStage.WAITING_PAYMENT -> "WAITING FOR PAYMENT"
         OrderStage.TO_PACK -> "TO PACK"
+        OrderStage.TO_SHIP -> "TO SHIP"
         OrderStage.SHIPPED -> "SHIPPED"
         OrderStage.COMPLETED -> "COMPLETED"
         OrderStage.CANCELLED -> "CANCELLED"

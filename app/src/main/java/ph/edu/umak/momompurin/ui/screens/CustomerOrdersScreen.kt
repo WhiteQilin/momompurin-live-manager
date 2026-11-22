@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,10 +31,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ph.edu.umak.momompurin.data.MomoStore
+import ph.edu.umak.momompurin.data.OrderOps
+import ph.edu.umak.momompurin.data.QrEncoder
 import ph.edu.umak.momompurin.data.entity.Order
 import ph.edu.umak.momompurin.data.entity.OrderStage
+import ph.edu.umak.momompurin.data.entity.ShippingStatus
+import ph.edu.umak.momompurin.ui.components.KeyValueRow
 import ph.edu.umak.momompurin.ui.components.MomoBadges
+import ph.edu.umak.momompurin.ui.components.MomoButton
 import ph.edu.umak.momompurin.ui.components.MomoCard
+import ph.edu.umak.momompurin.ui.components.MomoConfirmDialog
+import ph.edu.umak.momompurin.ui.components.MomoDivider
 import ph.edu.umak.momompurin.ui.components.MomoTopBar
 import ph.edu.umak.momompurin.ui.components.MiniAction
 import ph.edu.umak.momompurin.ui.components.StatusBadge
@@ -309,8 +318,10 @@ fun CustomerOrderDetailScreen(
     val data by store.data.collectAsState()
     val order = data.order(orderId)
     var showCancel by remember { mutableStateOf(false) }
+    var showReceived by remember { mutableStateOf(false) }
     var reason by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
 
     if (order == null) {
         Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
@@ -326,6 +337,17 @@ fun CustomerOrderDetailScreen(
         order.stage == OrderStage.ORDER_PLACED ||
             order.stage == OrderStage.WAITING_PAYMENT
         )
+
+    // UAT fix (item 8): an invoice only exists once the OWNER has confirmed and
+    // sent it. `stage == ORDER_PLACED` is precisely the window in which it does
+    // not, so the View invoice control is absent there rather than leading to an
+    // empty document.
+    val invoiceAvailable = order.stage != OrderStage.ORDER_PLACED &&
+        order.invoiceNo.isNotBlank()
+
+    // UAT fix (item 5): the customer's own receipt confirmation, offered only
+    // while the parcel is with the courier.
+    val canConfirmReceipt = order.shippingStatus == ShippingStatus.IN_TRANSIT
 
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
         MomoTopBar(title = orderId, onBack = onBack, contextPill = order.stage.label)
@@ -422,6 +444,63 @@ fun CustomerOrderDetailScreen(
                 }
             }
 
+            // UAT fix (item 8): before the invoice exists the order is with the
+            // seller, and the customer's only question is "what is happening?".
+            // The badge names the state in the customer's terms and the helper
+            // text says what the seller is actually doing, so nobody waits for a
+            // payment screen that has not been created yet.
+            if (order.stage == OrderStage.ORDER_PLACED) {
+                item {
+                    MomoCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusBadge(MomoBadges.forApproval())
+                        }
+                        Spacer(Modifier.height(MomoSpace.Sm))
+                        Text(
+                            "The seller is reviewing your order and setting the " +
+                                "shipping fee before issuing your invoice.",
+                            style = MomoType.CaptionSmall,
+                            color = MomoColors.TextSecondary,
+                        )
+                    }
+                }
+            }
+
+            // UAT fix (item 9): once approved, the two things the customer needs to
+            // act are the deadline and where to send the money - so both are in one
+            // card, above the totals rather than below them.
+            if (invoiceAvailable && order.balance > 0) {
+                item {
+                    PaymentCard(order = order, store = store)
+                }
+            }
+
+            // UAT fix (item 5): the customer's `Order Received` confirmation.
+            if (canConfirmReceipt) {
+                item {
+                    MomoCard {
+                        Text(
+                            "Did your order arrive?",
+                            style = MomoType.TitleSmall,
+                            color = MomoColors.TextPrimary,
+                        )
+                        Spacer(Modifier.height(MomoSpace.Xs))
+                        Text(
+                            "Confirm once you have the parcel so the seller can " +
+                                "close the order.",
+                            style = MomoType.CaptionSmall,
+                            color = MomoColors.TextSecondary,
+                        )
+                        Spacer(Modifier.height(MomoSpace.Md))
+                        MomoButton(
+                            label = "Order Received",
+                            onClick = { showReceived = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+
             // A-15 c8's off-app payment note, shown to the customer on their order.
             if (order.stage == OrderStage.WAITING_PAYMENT) {
                 item {
@@ -446,11 +525,14 @@ fun CustomerOrderDetailScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(MomoSpace.Sm)) {
                     // A-16 c5: the invoice opens read-only, with no edit or delete.
-                    MiniAction(
-                        label = "View invoice",
-                        onClick = { onOpenInvoice(orderId) },
-                        emphasised = true,
-                    )
+                    // UAT fix (item 8): only once it exists.
+                    if (invoiceAvailable) {
+                        MiniAction(
+                            label = "View invoice",
+                            onClick = { onOpenInvoice(orderId) },
+                            emphasised = true,
+                        )
+                    }
                     if (canCancel) {
                         MiniAction(
                             label = "Cancel order",
@@ -458,6 +540,16 @@ fun CustomerOrderDetailScreen(
                             destructive = true,
                         )
                     }
+                }
+            }
+
+            if (notice != null) {
+                item {
+                    Text(
+                        notice!!,
+                        style = MomoType.CaptionBold,
+                        color = MomoColors.SuccessText,
+                    )
                 }
             }
 
@@ -513,11 +605,189 @@ fun CustomerOrderDetailScreen(
             onDismiss = { showCancel = false },
         )
     }
+
+    // UAT fix (item 5): a confirmation before the order closes - this is the last
+    // irreversible step the CUSTOMER takes on their own order, so it asks first.
+    if (showReceived) {
+        MomoConfirmDialog(
+            title = "Order Received",
+            message = "Confirm that the parcel for $orderId has arrived. The order " +
+                "will be marked Received and Completed.",
+            confirmLabel = "Order Received",
+            dismissLabel = "Not yet",
+            onConfirm = {
+                showReceived = false
+                when (val result = store.markOrderReceived(orderId)) {
+                    is OrderOps.ReceiveResult.Received -> {
+                        notice = OrderOps.ORDER_RECEIVED_CONFIRMED
+                    }
+                    is OrderOps.ReceiveResult.Refused -> {
+                        // The refusal states why; showing it as an error keeps a
+                        // "already received" answer from reading as success.
+                        notice = result.message
+                    }
+                }
+            },
+            onDismiss = { showReceived = false },
+        )
+    }
+}
+
+/**
+ * UAT fix (item 9): the payment due date and the payment QR, once approved.
+ *
+ * ## The due date
+ *
+ * A-04 c6 opens a 24-hour window when the invoice is sent, so the deadline is
+ * `invoiceSentAt + 24 hours`. That deadline is already stored on the order
+ * ([Order.paymentDeadline]), which is what the owner's screen counts down - so
+ * this card reads the SAME field rather than adding 24 hours again here. A second
+ * derivation would be a second source of truth for a money deadline, and the two
+ * would eventually disagree by however much the clocks drifted.
+ *
+ * When no deadline is stored (an order invoiced before the field existed), the
+ * card says so instead of inventing one.
+ *
+ * ## The QR
+ *
+ * Generated locally by [QrEncoder] from the order's own payment details - there
+ * is no network call, no bitmap asset to ship, and nothing to load asynchronously,
+ * so the code is on screen the frame the card composes. The payload names the
+ * shop, the amount owed and the reference, which is what a GCash/Maya transfer
+ * needs to be matched to this order by hand.
+ *
+ * If the encoder refuses the payload (it is capped at version 10), the card shows
+ * the reference and amount as text and says the QR is unavailable - it never
+ * renders a code that does not encode the right thing.
+ */
+@Composable
+private fun PaymentCard(order: Order, store: MomoStore) {
+    MomoCard {
+        Text(
+            "Payment",
+            style = MomoType.TitleSmall,
+            color = MomoColors.TextPrimary,
+        )
+        Spacer(Modifier.height(MomoSpace.Sm))
+
+        // ---- the deadline -----------------------------------------------------
+        val deadline = order.paymentDeadline
+        if (deadline != null) {
+            val overdue = order.isOverdue(store.now)
+            KeyValueRow(
+                "Pay by",
+                MomoDate.formatDateTime(deadline),
+                valueColor = if (overdue) MomoColors.DangerInk else MomoColors.TextPrimary,
+            )
+            Text(
+                if (overdue) {
+                    "The 24-hour payment window has passed."
+                } else {
+                    "Due within 24 hours of the invoice being sent."
+                },
+                style = MomoType.CaptionSmall,
+                color = if (overdue) MomoColors.DangerInk else MomoColors.TextSecondary,
+            )
+        } else {
+            Text(
+                "The payment deadline is being set by the seller.",
+                style = MomoType.CaptionSmall,
+                color = MomoColors.TextSecondary,
+            )
+        }
+
+        Spacer(Modifier.height(MomoSpace.Md))
+        MomoDivider()
+        Spacer(Modifier.height(MomoSpace.Md))
+
+        // ---- the QR -----------------------------------------------------------
+        KeyValueRow("Amount due", MomoMoney.format(order.balance), emphasise = true)
+        if (order.invoiceNo.isNotBlank()) {
+            KeyValueRow("Reference", order.invoiceNo)
+        }
+
+        Spacer(Modifier.height(MomoSpace.Md))
+        val payload = paymentPayload(order)
+        val matrix = remember(payload) { QrEncoder.encode(payload) }
+        if (matrix != null) {
+            Box(
+                Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                QrCode(matrix = matrix, modifier = Modifier.size(180.dp))
+            }
+        } else {
+            Text(
+                "The payment QR is unavailable on this device. Use the reference " +
+                    "and amount above.",
+                style = MomoType.CaptionSmall,
+                color = MomoColors.WarningText,
+            )
+        }
+
+        Spacer(Modifier.height(MomoSpace.Md))
+        Text(
+            "Scan with GCash or Maya, or pay by Bank Transfer.",
+            style = MomoType.CaptionSmall,
+            color = MomoColors.TextSecondary,
+        )
+    }
+}
+
+/**
+ * UAT fix (item 9): the text the payment QR encodes.
+ *
+ * A plain, human-checkable summary rather than a payment-provider URI: the shop
+ * collects off-app (A-15 c8), so the code's job is to carry the reference and the
+ * amount to whoever is looking at the customer's screen. A scheme the app cannot
+ * honour - a `gcash://` deep link it has no way to test - would be a promise the
+ * build cannot keep.
+ *
+ * Kept as its own function so a test can assert the payload rather than only the
+ * matrix.
+ */
+fun paymentPayload(order: Order): String = listOf(
+    "Momompurin",
+    "Invoice ${order.invoiceNo.ifBlank { order.orderId }}",
+    "Amount PHP ${MomoMoney.plain(order.balance)}",
+).joinToString(" | ")
+
+/**
+ * Draws a QR matrix on a Canvas (UAT fix, item 9).
+ *
+ * Each module is one filled square, with FOUR modules of quiet zone - the border
+ * the standard requires for a scanner to find the finder patterns. Without it a
+ * camera can read a QR on paper but struggles with one drawn edge-to-edge inside
+ * a card.
+ */
+@Composable
+private fun QrCode(matrix: Array<BooleanArray>, modifier: Modifier = Modifier) {
+    val dark = MomoColors.TextPrimary
+    val light = MomoColors.SurfaceCard
+    androidx.compose.foundation.Canvas(modifier) {
+        val modules = matrix.size
+        val quiet = 4
+        val total = modules + quiet * 2
+        val cell = size.minDimension / total
+        drawRect(color = light, size = size)
+        for (row in 0 until modules) {
+            for (col in 0 until modules) {
+                if (!matrix[row][col]) continue
+                drawRect(
+                    color = dark,
+                    topLeft = androidx.compose.ui.geometry.Offset(
+                        x = (col + quiet) * cell,
+                        y = (row + quiet) * cell,
+                    ),
+                    size = androidx.compose.ui.geometry.Size(cell + 0.5f, cell + 0.5f),
+                )
+            }
+        }
+    }
 }
 
 @Composable
-private fun StatusRow(label: String, spec: ph.edu.umak.momompurin.ui.components.BadgeSpec?) {
-    Row(
+private fun StatusRow(label: String, spec: ph.edu.umak.momompurin.ui.components.BadgeSpec?) {    Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

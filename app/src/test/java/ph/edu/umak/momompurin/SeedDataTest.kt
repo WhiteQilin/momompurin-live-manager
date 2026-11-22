@@ -250,7 +250,10 @@ class SeedDataTest {
         assertEquals(MomoMoney.parse("600.00"), order.amountPaid)
         assertEquals(MomoMoney.parse("280.00"), order.balance)
         assertEquals(PaymentStatus.PARTIALLY_PAID, order.paymentStatus)
-        assertEquals(OrderStage.TO_PACK, order.stage)
+        // UAT fix (item 2): a Partially Paid order may not sit in To Pack - A-07
+        // packs only fully-paid orders. The canonical payment figures above are
+        // unchanged; only the queue the order waits in moved.
+        assertEquals(OrderStage.WAITING_PAYMENT, order.stage)
         assertEquals("MP-1042", order.invoiceNo)
     }
 
@@ -372,13 +375,18 @@ class SeedDataTest {
         //   Pending     = stage Order Placed                 -> 4
         //   Unpaid      = balance > 0 past Incoming          -> 3 (1042, 1043, 1045)
         //   Held        = Hold For Combined + Paid           -> 4 (1036, 1037, 1038, 1039)
-        //   To pack     = stage To Pack, held excluded       -> 3 (1042, 1043, 1040)
+        //   To pack     = stage To Pack, held excluded       -> 2 (1052, 1040)
         assertEquals("Pending orders", 4, data.pendingOrders().size)
         assertEquals("Unpaid or overdue", 3, data.unpaidOrOverdue().size)
         assertEquals("Held orders", 4, data.heldOrders().size)
         // To pack excludes held orders: a held order waits for A-06's Combine, not
         // for the packing table.
-        assertEquals("To pack", 3, data.toPackOrders().size)
+        //
+        // UAT fix (item 2): the count is 2, not 3. 1042 and 1043 are Partially
+        // Paid, and A-07 refuses to pack an order that is not fully paid, so they
+        // no longer occupy this queue. ORD-1052 is the replacement row that keeps
+        // two genuinely packable orders on a fresh install.
+        assertEquals("To pack", 2, data.toPackOrders().size)
     }
 
     @Test
@@ -391,8 +399,8 @@ class SeedDataTest {
 
     @Test
     fun unpaid_or_overdue_is_the_three_orders_still_owing_money() {
-        // ORD-1042 (partially paid, To Pack), ORD-1043 (partially paid, Packed)
-        // and ORD-1045 (overdue). ORD-1043 is what makes A-04's
+        // ORD-1042 (partially paid, Waiting for Payment), ORD-1043 (partially
+        // paid, Packed) and ORD-1045 (overdue). ORD-1043 is what makes A-04's
         // "Packed orders cannot be cancelled." reachable without walking A-07.
         assertEquals(
             setOf("ORD-1042", "ORD-1043", "ORD-1045"),

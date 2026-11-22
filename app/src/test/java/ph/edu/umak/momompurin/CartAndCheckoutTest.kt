@@ -356,7 +356,7 @@ class CartAndCheckoutTest {
         // what the seed held, which is how it survived the reserved-count drift.)
         assertEquals(3, data.product("SCWH")!!.reserved)
         assertEquals(3, result.data.product("SCWH")!!.reserved)
-        assertEquals(13, result.data.orders.size)
+        assertEquals(14, result.data.orders.size)
     }
 
     @Test
@@ -366,7 +366,7 @@ class CartAndCheckoutTest {
             "Connect to the internet to place your order.",
             (result as OrderOps.PlaceResult.Refused).message,
         )
-        assertEquals(13, result.data.orders.size)
+        assertEquals(14, result.data.orders.size)
     }
 
     @Test
@@ -423,7 +423,7 @@ class CartAndCheckoutTest {
 
     @Test
     fun a15_the_next_order_number_is_past_every_existing_order() {
-        assertEquals("ORD-1052", OrderOps.nextOrderId(data))
+        assertEquals("ORD-1053", OrderOps.nextOrderId(data))
     }
 
     @Test

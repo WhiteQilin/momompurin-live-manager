@@ -30,7 +30,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import ph.edu.umak.momompurin.data.AccountOps
 import ph.edu.umak.momompurin.data.MomoStore
 import ph.edu.umak.momompurin.ui.components.MomoButton
+import ph.edu.umak.momompurin.ui.components.MomoConfirmDialog
 import ph.edu.umak.momompurin.ui.components.MomoField
+import ph.edu.umak.momompurin.ui.components.MomoMessages
 import ph.edu.umak.momompurin.ui.components.MomoTopBar
 import ph.edu.umak.momompurin.ui.theme.MomoColors
 import ph.edu.umak.momompurin.ui.theme.MomoSpace
@@ -71,24 +73,62 @@ fun RegistrationScreen(
     var showPassword by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // UAT fix (item 14): the RA 10173 confirmation, shown once the form is valid.
+    var showPrivacy by remember { mutableStateOf(false) }
 
     // C.2: the mismatch is its own inline error under its own field, checked on
     // every keystroke, so a tester sees it the moment the two diverge rather than
     // only after tapping Create account.
     val confirmMismatch = confirmPassword.isNotEmpty() && confirmPassword != password
 
+    // UAT fix (item 14): LIVE per-field validation.
+    //
+    // Each warning appears as soon as the field has CONTENT that is wrong, rather
+    // than only after a submit. The emptiness test is skipped while the field is
+    // blank so a form the user has not reached yet does not open covered in red -
+    // "touched" here means "has been typed into", which Compose cannot observe
+    // without a focus tracker, so content is the honest proxy.
+    val emailInvalid = email.isNotBlank() && !AccountOps.isEmail(email)
+    // A-11 c4 / A-17 c3: 11 digits. The other rule the report asks for - that it
+    // starts with 09 - is checked too, because a PH mobile that does not is a
+    // typo the length test alone accepts.
+    val mobileDigits = AccountOps.normaliseMobile(mobile)
+    val mobileInvalid = mobile.isNotBlank() && !AccountOps.isMobile(mobile)
+    val mobileWrongPrefix = mobileDigits.length == 11 && !mobileDigits.startsWith("09")
+    val passwordTooShort = password.isNotEmpty() &&
+        password.length < AccountOps.MIN_PASSWORD_LENGTH
+
     fun submit() {
         error = null
         // C.2: the mismatch blocks BEFORE the store call, so the criterion's flow
-        // is visible at the field rather than as a generic failure banner.
+        // is visible at the field rather than as a generic failure banner. Every
+        // other rule is already on screen as a live warning, so reaching here with
+        // one broken means the user tapped through them.
         if (confirmMismatch) {
             error = "Passwords do not match."
+            return
+        }
+        if (emailInvalid) {
+            error = AccountOps.INVALID_EMAIL
+            return
+        }
+        if (mobileInvalid || mobileWrongPrefix) {
+            error = AccountOps.INVALID_MOBILE
             return
         }
         if (password.length < AccountOps.MIN_PASSWORD_LENGTH) {
             error = AccountOps.SHORT_PASSWORD
             return
         }
+        // UAT fix (item 14): a valid form asks for the RA 10173 confirmation
+        // BEFORE creating anything, so consent and the commit are the same tap and
+        // neither can happen without the other.
+        showPrivacy = true
+    }
+
+    /** The single place an account is actually created, after consent. */
+    fun createAccount() {
+        showPrivacy = false
         error = store.register(
             AccountOps.Registration(
                 fullName = fullName,
@@ -103,7 +143,13 @@ fun RegistrationScreen(
             ),
         )
         // A-11 c8: on success the Shop opens signed in as the new customer.
-        if (error == null) onRegistered()
+        if (error == null) {
+            // UAT fix (item 14): the welcome the report asks for, raised through
+            // the app-wide snackbar so it appears over the Shop the customer lands
+            // on rather than on the form that is being dismissed.
+            MomoMessages.show("Account created! Welcome to Momompurin.")
+            onRegistered()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MomoColors.SurfaceCanvas)) {
@@ -154,6 +200,9 @@ fun RegistrationScreen(
                 label = "Email",
                 labelOutside = true,
                 keyboardType = KeyboardType.Email,
+                // UAT fix (item 14): the warning appears as the text goes wrong,
+                // not after a submit.
+                error = if (emailInvalid) AccountOps.INVALID_EMAIL else null,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(MomoSpace.Md))
@@ -165,6 +214,13 @@ fun RegistrationScreen(
                 labelOutside = true,
                 supporting = "11 digits, for example 0917 555 0199",
                 keyboardType = KeyboardType.Phone,
+                // UAT fix (item 14): two separate corrections, because "not 11
+                // digits" and "does not start with 09" need different fixes.
+                error = when {
+                    mobileInvalid -> AccountOps.INVALID_MOBILE
+                    mobileWrongPrefix -> "A mobile number starts with 09."
+                    else -> null
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -194,9 +250,12 @@ fun RegistrationScreen(
             MomoField(
                 value = addressLine,
                 onValueChange = { addressLine = it; error = null },
-                label = "Full address",
+                // UAT fix (item 10): the cascading picker above already supplies
+                // province/city/barangay, so this field is the street-level part -
+                // and the label now says so.
+                label = "Street Name, Building, House No.",
                 labelOutside = true,
-                supporting = "House or unit number and street",
+                supporting = "For example 12 Mabini St., Unit 4B",
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -214,6 +273,9 @@ fun RegistrationScreen(
                 label = "Password",
                 labelOutside = true,
                 supporting = "At least 8 characters",
+                // UAT fix (item 14): the length rule is stated the moment it is
+                // broken, not on submit.
+                error = if (passwordTooShort) AccountOps.SHORT_PASSWORD else null,
                 keyboardType = KeyboardType.Password,
                 visualTransformation = if (showPassword) {
                     VisualTransformation.None
@@ -294,5 +356,22 @@ fun RegistrationScreen(
 
             Spacer(Modifier.height(MomoSpace.Xxl))
         }
+    }
+
+    // UAT fix (item 14): the RA 10173 consent dialog. It is a full confirmation
+    // rather than a checkbox because the wording is a statement about DATA the
+    // customer is handing over - it has to be read once, at the moment it applies.
+    // `Review` returns to the form with everything typed still in place.
+    if (showPrivacy) {
+        MomoConfirmDialog(
+            title = "Confirm your details",
+            message = "Confirm your details are accurate and that you agree to " +
+                "Momompurin saving your contact and delivery information for order " +
+                "fulfillment under RA 10173 (Data Privacy Act of 2012).",
+            confirmLabel = "Agree & Create Account",
+            dismissLabel = "Review",
+            onConfirm = { createAccount() },
+            onDismiss = { showPrivacy = false },
+        )
     }
 }

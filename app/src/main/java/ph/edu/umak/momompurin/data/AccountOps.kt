@@ -239,6 +239,91 @@ object AccountOps {
      */
     const val MIN_PASSWORD_LENGTH = 8
 
+    // ------------------------------------------- UAT fix (item 13): reset ------
+
+    /**
+     * UAT fix (item 13): the owner's account cannot be reset this way.
+     *
+     * The customer flow proves identity with an email plus a mobile number - two
+     * fields the CUSTOMER supplied at registration. The owner's account has no
+     * such registration moment, so the same two fields would be a weaker claim on
+     * the account that owns the shop, the stock figures and the sales reports. The
+     * only supported recovery for it is an authenticated change from inside the
+     * session.
+     */
+    const val OWNER_RECOVERY_RESTRICTED =
+        "Owner password recovery is restricted for security."
+
+    /** UAT fix (item 13): no account carries both the email and the mobile. */
+    const val NO_SUCH_CUSTOMER =
+        "No customer account matches that email and mobile number."
+
+    /** UAT fix (item 13): the two passwords typed on the reset form differ. */
+    const val RESET_MISMATCH = "Passwords do not match."
+
+    /** UAT fix (item 13): the reset succeeded. */
+    const val PASSWORD_RESET = "Password reset. You can sign in with the new password."
+
+    sealed interface ResetResult {
+        data class Success(val account: Account) : ResetResult
+        data class Failure(val message: String) : ResetResult
+    }
+
+    /**
+     * UAT fix (item 13): reset a CUSTOMER's password from email + mobile.
+     *
+     * ## Why the checks are in this order
+     *
+     * 1. **Blank/format fields** first, so a mistyped email is answered as a typo
+     *    rather than as "no such customer" - the second is alarming and the first
+     *    is actionable.
+     * 2. **The owner refusal** BEFORE the lookup. If an attacker submits the
+     *    owner's email and the wrong mobile, answering "no such customer" would
+     *    be true but would also hide the fact that the account exists and is
+     *    deliberately unrecoverable. Answering with the policy is the honest reply,
+     *    and it is the same answer whether or not the mobile matched, so it cannot
+     *    be used as an oracle for the owner's phone number.
+     * 3. **The lookup**, requiring BOTH fields to match the SAME account.
+     * 4. **The new password** length and confirmation last, because only an
+     *    authenticated-enough caller should reach the point where the form starts
+     *    talking about the new password at all.
+     *
+     * The digest is written with the same [digest] the rest of the app uses, so a
+     * reset account signs in through the unchanged [signIn] path with no special
+     * case.
+     */
+    fun resetCustomerPassword(
+        data: MomoData,
+        email: String,
+        mobile: String,
+        newPassword: String,
+        confirm: String,
+    ): ResetResult {
+        if (email.isBlank()) return ResetResult.Failure(BLANK_EMAIL)
+        if (!isEmail(email)) return ResetResult.Failure(INVALID_EMAIL)
+        // "You left this blank" and "this is not 11 digits" are different
+        // corrections, so the blank case gets its own answer.
+        if (normaliseMobile(mobile).isEmpty()) return ResetResult.Failure(INVALID_MOBILE)
+
+        // The owner's account is refused before any lookup - see the note above on
+        // why this answer does not depend on whether the mobile matched.
+        val present = data.account(email)
+        if (present?.role == Role.OWNER) {
+            return ResetResult.Failure(OWNER_RECOVERY_RESTRICTED)
+        }
+
+        val wanted = normaliseMobile(mobile)
+        val account = present?.takeIf { it.mobile.filter { ch -> ch.isDigit() } == wanted }
+            ?: return ResetResult.Failure(NO_SUCH_CUSTOMER)
+
+        if (newPassword.length < MIN_PASSWORD_LENGTH) {
+            return ResetResult.Failure(SHORT_PASSWORD)
+        }
+        if (newPassword != confirm) return ResetResult.Failure(RESET_MISMATCH)
+
+        return ResetResult.Success(account.copy(passwordDigest = digest(newPassword)))
+    }
+
     // ---------------------------------------------------- password hashing ----
 
     /**
