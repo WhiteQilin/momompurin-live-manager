@@ -1,0 +1,4 @@
+# Checksum files must be byte-exact: `sha256sum -c` reads the filename after the
+# two spaces, and a CRLF checkout leaves a trailing \r on it, so the check fails
+# with "No such file or directory" on Linux and in CI. Never convert these.
+*.sha256 -text
