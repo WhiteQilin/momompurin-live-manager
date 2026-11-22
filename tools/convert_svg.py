@@ -17,10 +17,20 @@ Usage: python convert_svg.py <input-dir> <output-drawable-dir>
 import re
 import sys
 import os
-import xml.etree.ElementTree as ET
+
+# defusedxml refuses DTDs, external entities and entity expansion, which is what
+# makes parsing a third-party SVG safe. A build tool should not be the weak link
+# in the chain. Declared in tools/requirements.txt; the import is deliberately
+# hard rather than falling back to the stdlib parser, because a silent downgrade
+# to the unsafe parser is worse than a clear ImportError.
+from defusedxml import ElementTree as ET
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
-ET.register_namespace("android", ANDROID_NS)
+# defusedxml exposes fromstring/ParseError but not register_namespace; it is only
+# used to control the output prefix, so a missing one is not worth a dependency
+# failure. xml.etree has it, defusedxml does not.
+if hasattr(ET, "register_namespace"):
+    ET.register_namespace("android", ANDROID_NS)
 
 
 def parse_dim(value):

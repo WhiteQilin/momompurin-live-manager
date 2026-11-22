@@ -14,7 +14,13 @@ import re
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
+
+# uiautomator writes the dump this driver parses. It comes from our own emulator,
+# so it is trusted in practice, but defusedxml costs nothing here and means the
+# parser cannot be turned into an XXE vector if this script ever points at a
+# device we do not control. Declared in tools/requirements.txt; the import is
+# hard rather than falling back to the stdlib parser.
+from defusedxml import ElementTree as ET
 
 PKG = "ph.edu.umak.momompurin"
 ACTIVITY = f"{PKG}/.MainActivity"

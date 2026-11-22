@@ -229,8 +229,13 @@ grant select, insert, update, delete on
   public.stock_adjustment, public.settings, public.activity_log
   to authenticated;
 
-grant select on public.product, public.order_line, public.invoice
-  to anon;
+-- No anon grant here, deliberately. A previous revision granted select on
+-- product, order_line and invoice to anon, which contradicted the paragraph
+-- above and re-opened the plane 0002 closed: RLS is enabled in 0004, these
+-- tables carry owner-only policies, and "any invoice readable by id" is exactly
+-- what C1.2 forbids. Customers read the catalogue and their invoices through
+-- the projections in 0004, which run with their owner's rights and are granted
+-- to authenticated.
 
 comment on table public.stock_adjustment is
   'STOCK_ADJUSTMENT.reason is OPTIONAL per the client change; do not re-impose NOT NULL.';

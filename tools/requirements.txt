@@ -1,0 +1,10 @@
+# Python dependencies for the repository's build and QA tooling.
+#
+# The Android app does not use these; they are for tools/ scripts that run on a
+# developer machine or in CI.
+#
+#     python -m pip install -r tools/requirements.txt
+#
+# defusedxml is a hard requirement, not an optional accelerator: convert_svg.py
+# and v21_drive.py parse XML, and hard-wiring the safe parser is the whole point.
+defusedxml>=0.7.1

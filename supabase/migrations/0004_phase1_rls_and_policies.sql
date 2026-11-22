@@ -115,7 +115,11 @@ select
   i.total,
   o.live_session,
   c.name        as customer_name,
-  ol.sku,
+  -- sku is not on order_line: the line snapshots item_name, not the SKU, so the
+  -- SKU is resolved through product_id. item_name stays the snapshot from the
+  -- line, which is what F-02 c7 requires (a later rename must not rewrite a
+  -- past invoice); the SKU is the stable catalogue key and does not drift.
+  p.sku,
   ol.item_name,
   ol.qty,
   ol.unit_price,
@@ -123,12 +127,26 @@ select
 from public.invoice i
 join public."order" o   on o.order_id = i.order_id
 join public.customer c  on c.customer_id = o.customer_id
-left join public.order_line ol on ol.order_id = o.order_id;
+left join public.order_line ol on ol.order_id = o.order_id
+left join public.product p     on p.product_id = ol.product_id;
 -- As above: no item_cost_spent, freebies_spent, packaging_spent,
 -- total_cost_spent or net_earnings. The customer sees what they pay,
 -- never what the owner paid.
 
-grant select on public.customer_catalog, public.customer_invoice_view to anon, authenticated;
+-- The customer views are granted to `authenticated` only, not to `anon`.
+--
+-- 0002 revoked the public role from the data plane outright, and the posture
+-- the security checklist claims is "zero anon grants", which CI Gate 2 asserts.
+-- Granting these two views to anon re-opened part of that plane: an
+-- unauthenticated caller could read the catalogue and any customer's invoice by
+-- invoice_id, which is exactly what G5.3/C1.2 exist to prevent.
+--
+-- Nothing is lost by narrowing this. The app has no pre-auth surface - the nav
+-- host starts at SIGN_IN when there is no session (MomoNavHost.kt:108-111) - so
+-- every real reader of these views is signed in. The views keep
+-- `security_invoker = false` so they read through their owner's rights and an
+-- authenticated caller needs no direct grant on product or invoice.
+grant select on public.customer_catalog, public.customer_invoice_view to authenticated;
 
 -- ----------------------------------------------------- startup assertion ----
 -- s.4.3: "Assert at startup that an unauthenticated request returns zero rows
